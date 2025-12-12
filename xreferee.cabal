@@ -13,6 +13,7 @@ license-file: LICENSE.md
 category: Tools
 build-type: Simple
 extra-source-files:
+  test/XReferee/__snapshots__/ReportSpec.snap.md
   README.md
 
 source-repository head
@@ -42,33 +43,25 @@ executable xreferee
   default-language: GHC2021
   ghc-options: -Wall -Wcompat
 
--- test-suite skeletest-tests
---   type: exitcode-stdio-1.0
---   ghc-options: -F -pgmF=skeletest-preprocessor
---   build-tool-depends: skeletest:skeletest-preprocessor
---   hs-source-dirs: test
---   main-is: Main.hs
---   other-modules:
---     ExampleSpec
---     Skeletest.AssertionsSpec
---     Skeletest.Internal.CLISpec
---     Skeletest.Internal.FixturesSpec
---     Skeletest.Internal.SnapshotSpec
---     Skeletest.Internal.SpecSpec
---     Skeletest.Internal.TestTargetsSpec
---     Skeletest.MainSpec
---     Skeletest.PredicateSpec
---     Skeletest.PropSpec
---     Skeletest.TestUtils.Integration
---   build-depends:
---       base
---     , aeson
---     , containers
---     , directory
---     , filepath
---     , skeletest
---     , process
---     , text
---     , unliftio
---   default-language: GHC2021
---   ghc-options: -Wall -Wcompat
+test-suite referee-tests
+  type: exitcode-stdio-1.0
+  ghc-options: -F -pgmF=skeletest-preprocessor
+  build-tool-depends: skeletest:skeletest-preprocessor
+  hs-source-dirs: test
+  main-is: Main.hs
+  other-modules:
+    XReferee.SearchResultSpec
+    XReferee.ReportSpec
+    XReferee.TestUtils
+  build-depends:
+      base
+    , containers
+    , directory
+    , filepath
+    , process
+    , skeletest
+    , temporary
+    , text
+    , xreferee
+  default-language: GHC2021
+  ghc-options: -Wall -Wcompat

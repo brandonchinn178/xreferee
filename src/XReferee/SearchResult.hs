@@ -59,9 +59,12 @@ findLabelsFromGit opts markerStart markerEnd = do
   let args =
         concat
           [ ["grep"]
+          , ["--full-name"]
           , ["--line-number"]
           , ["-I"] -- ignore binary files
           , ["--fixed-strings", Text.unpack markerStart]
+          , ["--"]
+          , [":/"]
           , [":!" <> Text.unpack i | i <- opts.ignores]
           ]
   (code, stdout, stderr) <- readProcessWithExitCode "git" args ""
