@@ -3,4 +3,4 @@ packages: .
 with-compiler: ghc-9.12
 
 program-options
-  ghc-options: -Werror
+  ghc-options: -Werror -O2
