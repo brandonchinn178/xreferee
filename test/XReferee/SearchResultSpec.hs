@@ -19,6 +19,7 @@ import System.IO.Temp (withSystemTempDirectory)
 import System.Process qualified as Process
 import XReferee.SearchResult (
   LabelLoc (..),
+  SearchOpts (..),
   SearchResult (..),
   findRefsFromGit,
  )
@@ -39,6 +40,12 @@ spec = do
                 , references = Map.fromList [(anchor "foo", [LabelLoc "javascript/c/d/foo_ref.js" 1])]
                 }
         findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
+
+    it "handles ignores" $ do
+      withGitRepo [("ignored/test.txt", "^^(broken)")] $ do
+        let opts = defaultOpts{ignores = ["ignored/"]}
+            expected = SearchResult{anchors = mempty, references = mempty}
+        findRefsFromGit opts `shouldSatisfy` P.returns (P.eq expected)
 
     it "finds references from subdirectory" $ do
       let files =
