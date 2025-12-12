@@ -1,0 +1,90 @@
+name: Build
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_call:
+    inputs:
+      target:
+        description: 'Platform target to build'
+        required: true
+        type: string
+      runner:
+        description: 'The GitHub runner to use'
+        required: true
+        type: string
+    outputs:
+      version:
+        value: ${{ jobs.build.outputs.version }}
+
+env:
+  target: ${{ inputs.target || 'linux-x86_64' }}
+
+jobs:
+  build:
+    name: ${{ inputs.target || 'build' }}
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    steps:
+      -
+        name: Verify platform
+        run: |
+          set -x
+          case ${{ runner.os }} in
+            (Linux) os=linux ;;
+            (macOS) os=osx ;;
+            (*) echo 'Unknown OS' >&1; exit 1 ;;
+          esac
+          case ${{ runner.arch }} in
+            (X64) arch=x86_64 ;;
+            (ARM64) arch=arm64 ;;
+            (*) echo 'Unknown architecture' >&1; exit 1 ;;
+          esac
+          if [[ $os-$arch != ${{ env.target }} ]]; then
+            echo "Incorrect platform: $os-$arch" >&2
+            exit 1
+          fi
+      -
+        uses: actions/checkout@v5
+      -
+        uses: haskell-actions/setup@v2
+      -
+        name: cabal configure
+        run:
+          cabal configure
+            --enable-tests
+            --test-show-details=streaming
+      -
+        name: cabal update
+        run: cabal update
+      -
+        name: configure git for testing
+        run: |
+          git config set advice.defaultBranchName false
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+      -
+        name: build + test
+        run: cabal build all && cabal test all
+      -
+        uses: haskell-actions/parse-cabal-file@v1
+        id: cabal_file
+        with:
+          cabal_file: xreferee.cabal
+      -
+        name: Build binary
+        run: |
+          cabal install --installdir=./bin --install-method=copy
+          strip bin/xreferee
+          cp bin/xreferee bin/xreferee-${version}-${target}
+        env:
+          version: ${{ steps.cabal_file.outputs.version }}
+          target: ${{ env.target }}
+      -
+        name: Store binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: xreferee-binary-${{ env.target }}
+          path: bin/xreferee-*
+    outputs:
+      version: ${{ steps.cabal_file.outputs.version }}
