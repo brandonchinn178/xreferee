@@ -13,9 +13,11 @@ import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import XReferee.SearchResult (
-  Label (..),
+  Label,
   LabelLoc (..),
   SearchResult (..),
+  renderLabel,
+  toLabel,
  )
 
 newtype Report = Report {unReport :: [ReportSection]}
@@ -25,7 +27,7 @@ data ReportSectionInfo = ReportSectionInfo
   { header :: Text
   , fatal :: Bool
   }
-type Violations = Map Label [LabelLoc]
+type Violations = Map Text [LabelLoc]
 
 makeReport :: SearchResult -> Report
 makeReport result = Report . map resolve . unReportTemplate $ reportTemplate
@@ -39,7 +41,7 @@ renderReport = Text.intercalate "\n" . map renderSection . reportViolations
       Text.unlines . concat $
         [ ["========== " <> info.header <> " =========="]
         , concat
-            [ label.pretty : ["    " <> renderLoc loc | loc <- locs]
+            [ label : ["    " <> renderLoc loc | loc <- locs]
             | (label, locs) <- Map.toList violations
             ]
         ]
@@ -72,7 +74,8 @@ reportSectionBrokenRef = (info, mkViolations)
         { header = "Broken references"
         , fatal = True
         }
-    mkViolations result = filterKeys (`Map.notMember` result.anchors) result.references
+    mkViolations result =
+      renderLabelMap $ excludeKeysFrom result.anchors result.references
 
 reportSectionUnusedAnchors :: ReportSectionTemplate
 reportSectionUnusedAnchors = (info, mkViolations)
@@ -82,7 +85,8 @@ reportSectionUnusedAnchors = (info, mkViolations)
         { header = "Unused anchors"
         , fatal = False
         }
-    mkViolations result = filterKeys (`Map.notMember` result.references) result.anchors
+    mkViolations result =
+      renderLabelMap $ excludeKeysFrom result.references result.anchors
 
 reportSectionDuplicateAnchors :: ReportSectionTemplate
 reportSectionDuplicateAnchors = (info, mkViolations)
@@ -92,7 +96,14 @@ reportSectionDuplicateAnchors = (info, mkViolations)
         { header = "Duplicate anchors"
         , fatal = True
         }
-    mkViolations result = Map.filter ((> 1) . length) result.anchors
+    mkViolations result =
+      renderLabelMap $ Map.filter ((> 1) . length) result.anchors
+
+excludeKeysFrom :: (Label a, Label b) => Map a v -> Map b v -> Map b v
+excludeKeysFrom excludes = filterKeys ((`Map.notMember` Map.mapKeys toLabel excludes) . toLabel)
+
+renderLabelMap :: (Label a) => Map a v -> Map Text v
+renderLabelMap = Map.mapKeys renderLabel
 
 -- Added in containers 0.8
 filterKeys :: (k -> Bool) -> Map k a -> Map k a

@@ -6,6 +6,8 @@
 module XReferee.SearchResult (
   SearchOpts (..),
   SearchResult (..),
+  Anchor (..),
+  Reference (..),
   Label (..),
   LabelLoc (..),
   findRefsFromGit,
@@ -25,22 +27,35 @@ data SearchOpts = SearchOpts
   { ignores :: [Text]
   }
 
+-- Customize? https://github.com/brandonchinn178/xreferee/issues/11
+anchorStart, anchorEnd, refStart, refEnd :: Text
+(anchorStart, anchorEnd) = ("#(ref:", ")")
+(refStart, refEnd) = ("@(ref:", ")")
+
 data SearchResult = SearchResult
-  { anchors :: Map Label [LabelLoc]
-  , references :: Map Label [LabelLoc]
+  { anchors :: Map Anchor [LabelLoc]
+  , references :: Map Reference [LabelLoc]
   }
   deriving (Show, Eq)
 
-data Label = Label
-  { name :: Text
-  , pretty :: Text
-  }
-  deriving (Show)
+newtype Anchor = Anchor Text
+  deriving (Show, Eq, Ord)
 
-instance Eq Label where
-  l1 == l2 = l1.name == l2.name
-instance Ord Label where
-  compare l1 l2 = compare l1.name l2.name
+newtype Reference = Reference Text
+  deriving (Show, Eq, Ord)
+
+class Label a where
+  fromLabel :: Text -> a
+  toLabel :: a -> Text
+  renderLabel :: a -> Text
+instance Label Anchor where
+  fromLabel = Anchor
+  toLabel (Anchor s) = s
+  renderLabel (Anchor s) = anchorStart <> s <> anchorEnd
+instance Label Reference where
+  fromLabel = Reference
+  toLabel (Reference s) = s
+  renderLabel (Reference s) = refStart <> s <> refEnd
 
 data LabelLoc = LabelLoc
   { filepath :: FilePath
@@ -50,11 +65,11 @@ data LabelLoc = LabelLoc
 
 findRefsFromGit :: SearchOpts -> IO SearchResult
 findRefsFromGit opts = do
-  anchors <- findLabelsFromGit opts "#(ref:" ")"
-  references <- findLabelsFromGit opts "@(ref:" ")"
+  anchors <- findLabelsFromGit opts anchorStart anchorEnd
+  references <- findLabelsFromGit opts refStart refEnd
   pure SearchResult{..}
 
-findLabelsFromGit :: SearchOpts -> Text -> Text -> IO (Map Label [LabelLoc])
+findLabelsFromGit :: (Label a, Ord a) => SearchOpts -> Text -> Text -> IO (Map a [LabelLoc])
 findLabelsFromGit opts markerStart markerEnd = do
   let args =
         concat
@@ -90,11 +105,7 @@ findLabelsFromGit opts markerStart markerEnd = do
     parseLabel line = do
       let name = takeUntil markerEnd . dropUntil markerStart $ line
       guard $ (not . Text.null) name
-      pure
-        Label
-          { name = name
-          , pretty = markerStart <> name <> markerEnd
-          }
+      pure $ fromLabel name
 
     dropUntil delim s =
       let (_, s') = Text.breakOn delim s

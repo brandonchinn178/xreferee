@@ -11,10 +11,11 @@ import XReferee.Report (
   reportFailure,
  )
 import XReferee.SearchResult (
+  Anchor (..),
   LabelLoc (..),
+  Reference (..),
   SearchResult (..),
  )
-import XReferee.TestUtils (anchor, ref)
 
 spec :: Spec
 spec = do
@@ -24,15 +25,15 @@ spec = do
             SearchResult
               { anchors =
                   Map.fromList
-                    [ (anchor "foo", [LabelLoc "foo_anchor.py" 1])
-                    , (anchor "unused", [LabelLoc "unused.py" 2])
-                    , (anchor "dup", [LabelLoc "dup1.py" 3, LabelLoc "dup2.py" 4])
+                    [ (Anchor "foo", [LabelLoc "foo_anchor.py" 1])
+                    , (Anchor "unused", [LabelLoc "unused.py" 2])
+                    , (Anchor "dup", [LabelLoc "dup1.py" 3, LabelLoc "dup2.py" 4])
                     ]
               , references =
                   Map.fromList
-                    [ (ref "foo", [LabelLoc "foo_ref.py" 1])
-                    , (ref "broken", [LabelLoc "broken.py" 2])
-                    , (ref "dup", [LabelLoc "dup1.py" 3, LabelLoc "dup2.py" 4])
+                    [ (Reference "foo", [LabelLoc "foo_ref.py" 1])
+                    , (Reference "broken", [LabelLoc "broken.py" 2])
+                    , (Reference "dup", [LabelLoc "dup1.py" 3, LabelLoc "dup2.py" 4])
                     ]
               }
       (renderReport . makeReport) result `shouldSatisfy` P.matchesSnapshot
@@ -44,7 +45,7 @@ spec = do
               { anchors = Map.fromList []
               , references =
                   Map.fromList
-                    [ (ref "broken", [LabelLoc "broken.py" 2])
+                    [ (Reference "broken", [LabelLoc "broken.py" 2])
                     ]
               }
       (reportFailure . makeReport) result `shouldBe` True
@@ -54,7 +55,7 @@ spec = do
             SearchResult
               { anchors =
                   Map.fromList
-                    [ (anchor "unused", [LabelLoc "unused.py" 1])
+                    [ (Anchor "unused", [LabelLoc "unused.py" 1])
                     ]
               , references = Map.fromList []
               }
