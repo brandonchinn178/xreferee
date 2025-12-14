@@ -43,5 +43,5 @@ main = do
   cli <- Opt.execParser cliOptions
   searchResult <- findRefsFromGit cli.searchOpts
   let report = makeReport searchResult
-  Text.putStrLn $ renderReport report
+  Text.putStr $ renderReport report
   when (reportFailure report) exitFailure

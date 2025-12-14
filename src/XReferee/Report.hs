@@ -33,10 +33,10 @@ makeReport result = Report . map resolve . unReportTemplate $ reportTemplate
     resolve (info, mkViolations) = (info, mkViolations result)
 
 renderReport :: Report -> Text
-renderReport = Text.intercalate "\n\n" . map renderSection . reportViolations
+renderReport = Text.intercalate "\n" . map renderSection . reportViolations
   where
     renderSection (info, violations) =
-      Text.intercalate "\n" . concat $
+      Text.unlines . concat $
         [ ["========== " <> info.header <> " =========="]
         , concat
             [ label.pretty : ["    " <> renderLoc loc | loc <- locs]
