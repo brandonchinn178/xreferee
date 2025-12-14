@@ -50,8 +50,8 @@ data LabelLoc = LabelLoc
 
 findRefsFromGit :: SearchOpts -> IO SearchResult
 findRefsFromGit opts = do
-  anchors <- findLabelsFromGit opts "@@(" ")"
-  references <- findLabelsFromGit opts "^^(" ")"
+  anchors <- findLabelsFromGit opts "#(ref:" ")"
+  references <- findLabelsFromGit opts "@(ref:" ")"
   pure SearchResult{..}
 
 findLabelsFromGit :: SearchOpts -> Text -> Text -> IO (Map Label [LabelLoc])

@@ -4,15 +4,15 @@
 
 ```
 ========== Broken references ==========
-^^(broken)
+@(ref:broken)
     broken.py:2
 
 ========== Duplicate anchors ==========
-@@(dup)
+#(ref:dup)
     dup1.py:3
     dup2.py:4
 
 ========== Unused anchors ==========
-@@(unused)
+#(ref:unused)
     unused.py:2
 ```

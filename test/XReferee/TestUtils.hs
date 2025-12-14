@@ -19,7 +19,7 @@ defaultOpts =
     }
 
 anchor :: Text -> Label
-anchor name = Label name ("@@(" <> name <> ")")
+anchor name = Label name ("#(ref:" <> name <> ")")
 
 ref :: Text -> Label
-ref name = Label name ("^^(" <> name <> ")")
+ref name = Label name ("@(ref:" <> name <> ")")

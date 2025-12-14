@@ -30,8 +30,8 @@ spec = do
   describe "findRefsFromGit" $ do
     it "finds references throughout git repo" $ do
       let files =
-            [ ("python/a/b/foo_anchor.py", "FOO = 1 # @@(foo)")
-            , ("javascript/c/d/foo_ref.js", "const FOO = 1 ^^(foo)")
+            [ ("python/a/b/foo_anchor.py", "FOO = 1 # #(ref:foo)")
+            , ("javascript/c/d/foo_ref.js", "const FOO = 1 @(ref:foo)")
             ]
       withGitRepo files $ do
         let expected =
@@ -42,15 +42,15 @@ spec = do
         findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
 
     it "handles ignores" $ do
-      withGitRepo [("ignored/test.txt", "^^(broken)")] $ do
+      withGitRepo [("ignored/test.txt", "@(ref:broken)")] $ do
         let opts = defaultOpts{ignores = ["ignored/"]}
             expected = SearchResult{anchors = mempty, references = mempty}
         findRefsFromGit opts `shouldSatisfy` P.returns (P.eq expected)
 
     it "finds references from subdirectory" $ do
       let files =
-            [ ("python/a/b/foo_anchor.py", "FOO = 1 # @@(foo)")
-            , ("javascript/c/d/foo_ref.js", "const FOO = 1 ^^(foo)")
+            [ ("python/a/b/foo_anchor.py", "FOO = 1 # #(ref:foo)")
+            , ("javascript/c/d/foo_ref.js", "const FOO = 1 @(ref:foo)")
             ]
       withGitRepo files $ do
         let expected =

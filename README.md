@@ -11,18 +11,18 @@ You can use this tool in CI or pre-commit hooks to validate that cross reference
 ```markdown
 This is a _markdown_ **file** documenting a feature.
 We can mark this as a source of truth with a Markdown comment:
-<!-- @@(my-feature) -->
+<!-- #(ref:my-feature) -->
 ```
 
 ```python
 # In my Python code, add a reference to the markdown document, where
 # you know you can just search for a matching anchor tag
-# See ^^(my-feature)
+# See @(ref:my-feature)
 def my_feature():
     pass
 
 # Maybe the Python file is also the source of truth for a constant:
-# @@(my-version-123)
+# #(ref:my-version-123)
 MY_VERSION = 123
 ```
 
@@ -30,7 +30,7 @@ MY_VERSION = 123
 // Then in my Javascript file, we can use a cross reference to ensure they're
 // kept in sync. If the label above is updated to `my-version-124`, then this
 // cross reference will be broken, and xreferee will flag it.
-// ^^(my-version-123)
+// @(ref:my-version-123)
 const MY_VERSION = 123
 ```
 
