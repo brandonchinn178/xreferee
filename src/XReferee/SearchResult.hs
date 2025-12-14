@@ -13,7 +13,7 @@ module XReferee.SearchResult (
   findRefsFromGit,
 ) where
 
-import Control.Monad (guard, when)
+import Control.Monad (when)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
@@ -87,28 +87,30 @@ findLabelsFromGit opts markerStart markerEnd = do
     -- TODO: Proper error?
     errorWithoutStackTrace ("git grep failed: " <> stderr)
 
-  pure . Map.fromListWith (<>) . map parseLine . Text.lines . Text.pack $ stdout
+  pure . Map.fromListWith (<>) . concatMap parseLine . Text.lines . Text.pack $ stdout
   where
-    parseLine line =
-      -- TODO: Proper error?
-      fromMaybe (errorWithoutStackTrace $ "got unexpected output from git grep: " <> show line) $ do
-        filepath : lineNumStr : rest <- pure $ Text.splitOn ":" line
-        lineNum <- readMaybe $ Text.unpack lineNumStr
-        label <- parseLabel $ Text.intercalate ":" rest
-        let loc =
-              LabelLoc
-                { filepath = Text.unpack filepath
-                , lineNum
-                }
-        pure (label, [loc])
+    parseLine line = fromMaybe [] $ do
+      filepath : lineNumStr : rest <- pure $ Text.splitOn ":" line
+      lineNum <- readMaybe $ Text.unpack lineNumStr
+      let labels = parseLabels $ Text.intercalate ":" rest
+          loc =
+            LabelLoc
+              { filepath = Text.unpack filepath
+              , lineNum
+              }
+      pure [(fromLabel label, [loc]) | label <- labels]
 
-    parseLabel line = do
-      let name = takeUntil markerEnd . dropUntil markerStart $ line
-      guard $ (not . Text.null) name
-      pure $ fromLabel name
+    parseLabels line =
+      let parseStart s =
+            case breakOn' markerStart s of
+              Just (_, s') -> parseLabel s'
+              Nothing -> []
+          parseLabel s =
+            case breakOn' markerEnd s of
+              Just (label, s') -> label : parseStart s'
+              Nothing -> []
+       in parseStart line
 
-    dropUntil delim s =
-      let (_, s') = Text.breakOn delim s
-       in fromMaybe s' $ Text.stripPrefix delim s'
-    takeUntil delim s =
-      fst $ Text.breakOn delim s
+    -- Same as breakOn, except returns Nothing if the delim isn't found, and
+    -- the snd string doesn't start with the delim.
+    breakOn' delim = traverse (Text.stripPrefix delim) . Text.breakOn delim

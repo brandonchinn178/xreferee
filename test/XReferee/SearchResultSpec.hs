@@ -37,6 +37,27 @@ spec = do
                 }
         findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
 
+    it "finds references on same line" $ do
+      let files =
+            [ ("python/a/b/foo_anchor.py", "FOO = 1 # #(ref:foo) #(ref:foo2)")
+            , ("javascript/c/d/foo_ref.js", "const FOO = 1 @(ref:foo) @(ref:foo2)")
+            ]
+      withGitRepo files $ do
+        let expected =
+              SearchResult
+                { anchors =
+                    Map.fromList
+                      [ (Anchor "foo", [LabelLoc "python/a/b/foo_anchor.py" 1])
+                      , (Anchor "foo2", [LabelLoc "python/a/b/foo_anchor.py" 1])
+                      ]
+                , references =
+                    Map.fromList
+                      [ (Reference "foo", [LabelLoc "javascript/c/d/foo_ref.js" 1])
+                      , (Reference "foo2", [LabelLoc "javascript/c/d/foo_ref.js" 1])
+                      ]
+                }
+        findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
+
     it "handles ignores" $ do
       withGitRepo [("ignored/test.txt", "@(ref:broken)")] $ do
         let opts = defaultOpts{ignores = ["ignored/"]}
