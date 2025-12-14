@@ -30,6 +30,7 @@ library
       base < 5
     , containers
     , deepseq
+    , megaparsec
     , process
     , text
   default-language: GHC2021
