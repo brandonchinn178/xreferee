@@ -12,14 +12,11 @@ import System.Directory (
  )
 import XReferee.GitUtils (withGitRepo)
 import XReferee.SearchResult (
-  Anchor (..),
-  LabelLoc (..),
-  Reference (..),
   SearchOpts (..),
   SearchResult (..),
   findRefsFromGit,
  )
-import XReferee.TestUtils (defaultOpts)
+import XReferee.TestUtils (anchor, defaultOpts, loc, ref)
 
 spec :: Spec
 spec = do
@@ -32,8 +29,8 @@ spec = do
       withGitRepo files $ do
         let expected =
               SearchResult
-                { anchors = Map.fromList [(Anchor "foo", [LabelLoc "python/a/b/foo_anchor.py" 1])]
-                , references = Map.fromList [(Reference "foo", [LabelLoc "javascript/c/d/foo_ref.js" 1])]
+                { anchors = Map.fromList [anchor "foo" [loc "python/a/b/foo_anchor.py" 1]]
+                , references = Map.fromList [ref "foo" [loc "javascript/c/d/foo_ref.js" 1]]
                 }
         findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
 
@@ -47,13 +44,13 @@ spec = do
               SearchResult
                 { anchors =
                     Map.fromList
-                      [ (Anchor "foo", [LabelLoc "python/a/b/foo_anchor.py" 1, LabelLoc "python/a/b/foo_anchor.py" 1])
-                      , (Anchor "foo2", [LabelLoc "python/a/b/foo_anchor.py" 1])
+                      [ anchor "foo" [loc "python/a/b/foo_anchor.py" 1, loc "python/a/b/foo_anchor.py" 1]
+                      , anchor "foo2" [loc "python/a/b/foo_anchor.py" 1]
                       ]
                 , references =
                     Map.fromList
-                      [ (Reference "foo", [LabelLoc "javascript/c/d/foo_ref.js" 1, LabelLoc "javascript/c/d/foo_ref.js" 1])
-                      , (Reference "foo2", [LabelLoc "javascript/c/d/foo_ref.js" 1])
+                      [ ref "foo" [loc "javascript/c/d/foo_ref.js" 1, loc "javascript/c/d/foo_ref.js" 1]
+                      , ref "foo2" [loc "javascript/c/d/foo_ref.js" 1]
                       ]
                 }
         findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
@@ -72,8 +69,8 @@ spec = do
       withGitRepo files $ do
         let expected =
               SearchResult
-                { anchors = Map.fromList [(Anchor "foo", [LabelLoc "python/a/b/foo_anchor.py" 1])]
-                , references = Map.fromList [(Reference "foo", [LabelLoc "javascript/c/d/foo_ref.js" 1])]
+                { anchors = Map.fromList [anchor "foo" [loc "python/a/b/foo_anchor.py" 1]]
+                , references = Map.fromList [ref "foo" [loc "javascript/c/d/foo_ref.js" 1]]
                 }
         withCurrentDirectory "python/a/b/" $
           findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
