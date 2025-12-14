@@ -1,7 +1,7 @@
 cabal-version: 3.0
 
 name: xreferee
-version: 0.0.0
+version: 1.0.0
 synopsis: Validate cross references
 description: Validate cross references.
 homepage: https://github.com/brandonchinn178/xreferee#readme
@@ -14,6 +14,7 @@ category: Tools
 build-type: Simple
 extra-source-files:
   test/XReferee/__snapshots__/ReportSpec.snap.md
+  CHANGELOG.md
   README.md
 
 source-repository head

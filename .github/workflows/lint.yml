@@ -1,0 +1,25 @@
+name: Lint
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  fourmolu:
+    runs-on: ubuntu-latest
+    env:
+      FOURMOLU_VERSION: '0.19.0.1'
+    steps:
+      -
+        uses: actions/checkout@v3
+      -
+        name: Install fourmolu
+        run: |
+          curl -fsSL \
+            "https://github.com/fourmolu/fourmolu/releases/download/v${FOURMOLU_VERSION}/fourmolu-${FOURMOLU_VERSION}-linux-x86_64" \
+            -o /usr/local/bin/fourmolu
+          chmod +x /usr/local/bin/fourmolu
+      -
+        name: Run fourmolu
+        run: fourmolu -m check .
