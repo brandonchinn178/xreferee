@@ -40,8 +40,7 @@ getGitFixtures = do
   where
     loadFixture fp = do
       Just result <- Aeson.decodeFileStrict fp
-      Just fixture <- pure $ Aeson.parseMaybe parseFixture result
-      pure fixture
+      either error pure $ Aeson.parseEither parseFixture result
 
     parseFixture o = do
       anchors <- traverse parseLoc =<< o .: "anchors"

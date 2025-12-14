@@ -78,7 +78,7 @@ data LabelLoc = LabelLoc
   { filepath :: FilePath
   , lineNum :: Int
   }
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 instance NFData LabelLoc where
   rnf loc = rnf loc.filepath `seq` rnf loc.lineNum
