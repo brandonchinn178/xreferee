@@ -51,12 +51,14 @@ test-suite referee-tests
   hs-source-dirs: test
   main-is: Main.hs
   other-modules:
+    XReferee.IntegrationSpec
     XReferee.SearchResultSpec
     XReferee.ReportSpec
     XReferee.GitUtils
     XReferee.TestUtils
   build-depends:
       base
+    , aeson
     , containers
     , directory
     , filepath
@@ -77,12 +79,12 @@ executable xreferee-e2e
   build-tool-depends: xreferee:xreferee
   build-depends:
       base
+    , aeson
     , containers
     , criterion
     , directory
     , filepath
     , process
-    , random
     , temporary
   default-language: GHC2021
   ghc-options: -Wall -Wcompat
