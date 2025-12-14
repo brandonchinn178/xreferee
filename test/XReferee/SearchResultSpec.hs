@@ -39,20 +39,20 @@ spec = do
 
     it "finds references on same line" $ do
       let files =
-            [ ("python/a/b/foo_anchor.py", "FOO = 1 # #(ref:foo) #(ref:foo2)")
-            , ("javascript/c/d/foo_ref.js", "const FOO = 1 @(ref:foo) @(ref:foo2)")
+            [ ("python/a/b/foo_anchor.py", "FOO = 1 # #(ref:foo) #(ref:foo) #(ref:foo2)")
+            , ("javascript/c/d/foo_ref.js", "const FOO = 1 @(ref:foo) @(ref:foo) @(ref:foo2)")
             ]
       withGitRepo files $ do
         let expected =
               SearchResult
                 { anchors =
                     Map.fromList
-                      [ (Anchor "foo", [LabelLoc "python/a/b/foo_anchor.py" 1])
+                      [ (Anchor "foo", [LabelLoc "python/a/b/foo_anchor.py" 1, LabelLoc "python/a/b/foo_anchor.py" 1])
                       , (Anchor "foo2", [LabelLoc "python/a/b/foo_anchor.py" 1])
                       ]
                 , references =
                     Map.fromList
-                      [ (Reference "foo", [LabelLoc "javascript/c/d/foo_ref.js" 1])
+                      [ (Reference "foo", [LabelLoc "javascript/c/d/foo_ref.js" 1, LabelLoc "javascript/c/d/foo_ref.js" 1])
                       , (Reference "foo2", [LabelLoc "javascript/c/d/foo_ref.js" 1])
                       ]
                 }
