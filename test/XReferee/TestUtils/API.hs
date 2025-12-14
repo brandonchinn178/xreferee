@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module XReferee.TestUtils (
+module XReferee.TestUtils.API (
   defaultOpts,
   anchor,
   ref,

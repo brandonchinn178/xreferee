@@ -6,7 +6,8 @@ import Criterion.Main
 import Data.List (sortOn)
 import System.Directory (findExecutable, getFileSize)
 import System.Process (readProcess)
-import XReferee.GitUtils (getGitFixtures, withGitRepo)
+import XReferee.TestUtils.Fixtures (getGitFixtures)
+import XReferee.TestUtils.Git (withGitRepo)
 
 main :: IO ()
 main = do

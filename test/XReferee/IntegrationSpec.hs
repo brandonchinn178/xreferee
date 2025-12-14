@@ -3,10 +3,11 @@ module XReferee.IntegrationSpec (spec) where
 import Control.Monad (forM_)
 import Data.Text qualified as Text
 import Skeletest
-import XReferee.GitUtils (getGitFixtures, withGitRepo)
 import XReferee.Report (makeReport, renderReport, reportFailure)
 import XReferee.SearchResult (findRefsFromGit)
-import XReferee.TestUtils (defaultOpts)
+import XReferee.TestUtils.API (defaultOpts)
+import XReferee.TestUtils.Fixtures (getGitFixtures)
+import XReferee.TestUtils.Git (withGitRepo)
 
 spec :: Spec
 spec = do

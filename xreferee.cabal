@@ -55,8 +55,9 @@ test-suite referee-tests
     XReferee.IntegrationSpec
     XReferee.SearchResultSpec
     XReferee.ReportSpec
-    XReferee.GitUtils
-    XReferee.TestUtils
+    XReferee.TestUtils.API
+    XReferee.TestUtils.Git
+    XReferee.TestUtils.Fixtures
   build-depends:
       base
     , aeson
@@ -76,7 +77,8 @@ executable xreferee-e2e
   hs-source-dirs: . test
   main-is: bench/Main.hs
   other-modules:
-    XReferee.GitUtils
+    XReferee.TestUtils.Git
+    XReferee.TestUtils.Fixtures
   build-tool-depends: xreferee:xreferee
   build-depends:
       base
