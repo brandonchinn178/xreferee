@@ -1,0 +1,23 @@
+name: Benchmark
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        uses: actions/checkout@v5
+      -
+        uses: haskell-actions/setup@v2
+      -
+        name: configure git for testing
+        run: |
+          git config set advice.defaultBranchName false
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+      -
+        run: stack run xreferee-e2e

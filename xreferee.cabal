@@ -67,3 +67,22 @@ test-suite referee-tests
     , xreferee
   default-language: GHC2021
   ghc-options: -Wall -Wcompat
+
+-- Using executable because benchmarks don't stream output
+executable xreferee-e2e
+  hs-source-dirs: . test
+  main-is: bench/Main.hs
+  other-modules:
+    XReferee.GitUtils
+  build-tool-depends: xreferee:xreferee
+  build-depends:
+      base
+    , containers
+    , criterion
+    , directory
+    , filepath
+    , process
+    , random
+    , temporary
+  default-language: GHC2021
+  ghc-options: -Wall -Wcompat

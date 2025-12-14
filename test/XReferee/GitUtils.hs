@@ -29,7 +29,7 @@ withGitRepo files action =
         createDirectoryIfMissing True (takeDirectory fp)
         writeFile fp content
       git ["add", "."]
-      git ["commit", "-m", "Initial commit", "--no-verify"]
+      git ["commit", "-m", "Initial commit", "--allow-empty", "--no-verify"]
       action
   where
     captureLogs logFile f = f `onException` (readFile logFile >>= putStrLn)
