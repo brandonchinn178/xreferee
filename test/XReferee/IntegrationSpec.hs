@@ -9,7 +9,7 @@ import XReferee.SearchResult (findRefsFromGit)
 import XReferee.TestUtils (defaultOpts)
 
 spec :: Spec
-spec = do
+spec = withMarkers ["integration"] $ do
   describe "fixture data" $ do
     it "passes" $ do
       fixtures <- getGitFixtures

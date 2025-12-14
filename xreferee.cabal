@@ -29,6 +29,7 @@ library
   build-depends:
       base < 5
     , containers
+    , deepseq
     , process
     , text
   default-language: GHC2021

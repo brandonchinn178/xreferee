@@ -14,14 +14,18 @@ module XReferee.SearchResult (
 ) where
 
 import Control.Applicative ((<|>))
+import Control.DeepSeq (NFData (..), ($!!))
+import Control.Exception (evaluate)
 import Control.Monad (guard, when)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.IO qualified as Text
 import System.Exit (ExitCode (..))
-import System.Process (readProcessWithExitCode)
+import System.IO qualified as IO
+import System.Process qualified as Process
 import Text.Read (readMaybe)
 
 data SearchOpts = SearchOpts
@@ -39,6 +43,8 @@ data SearchResult = SearchResult
   }
   deriving (Show, Eq)
 
+instance NFData SearchResult where
+  rnf result = rnf result.anchors `seq` rnf result.references
 instance Semigroup SearchResult where
   result1 <> result2 =
     SearchResult
@@ -49,10 +55,10 @@ instance Monoid SearchResult where
   mempty = SearchResult mempty mempty
 
 newtype Anchor = Anchor Text
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, NFData)
 
 newtype Reference = Reference Text
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, NFData)
 
 class Label a where
   fromLabel :: Text -> a
@@ -73,6 +79,9 @@ data LabelLoc = LabelLoc
   }
   deriving (Show, Eq)
 
+instance NFData LabelLoc where
+  rnf loc = rnf loc.filepath `seq` rnf loc.lineNum
+
 findRefsFromGit :: SearchOpts -> IO SearchResult
 findRefsFromGit opts = do
   let args =
@@ -85,12 +94,21 @@ findRefsFromGit opts = do
           , [":/"]
           , [":!" <> Text.unpack i | i <- opts.ignores]
           ]
-  (code, stdout, stderr) <- readProcessWithExitCode "git" args ""
-  when (code /= ExitSuccess && (not . null) stderr) $
-    -- TODO: Proper error?
-    errorWithoutStackTrace ("git grep failed: " <> stderr)
-
-  pure . mconcat . map parseLine . Text.lines . Text.pack $ stdout
+      proc =
+        (Process.proc "git" args)
+          { Process.std_out = Process.CreatePipe
+          , Process.std_err = Process.CreatePipe
+          }
+  Process.withCreateProcess proc $ \_ stdoutHandle stderrHandle ph -> do
+    stdout <- maybe (pure "") Text.hGetContents stdoutHandle
+    result <- evaluate $!! mconcat . map parseLine . Text.lines $ stdout
+    code <- Process.waitForProcess ph
+    stderr <- maybe (pure "") Text.hGetContents stderrHandle
+    Text.hPutStr IO.stderr stderr
+    when (code /= ExitSuccess && (not . Text.null) stderr) $
+      -- TODO: Proper error?
+      errorWithoutStackTrace "git grep failed"
+    pure result
   where
     parseLine line = fromMaybe mempty $ do
       filepath : lineNumStr : rest <- pure $ Text.splitOn ":" line
