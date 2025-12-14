@@ -89,5 +89,6 @@ executable xreferee-e2e
     , filepath
     , process
     , temporary
+    , text
   default-language: GHC2021
   ghc-options: -Wall -Wcompat

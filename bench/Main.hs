@@ -6,7 +6,7 @@ import Criterion.Main
 import Data.List (sortOn)
 import System.Directory (findExecutable, getFileSize)
 import System.Process (readProcess)
-import XReferee.TestUtils.Fixtures (getGitFixtures)
+import XReferee.TestUtils.Fixtures (Fixture (..), getGitFixtures)
 import XReferee.TestUtils.Git (withGitRepo)
 
 main :: IO ()
@@ -17,7 +17,7 @@ main = do
   fixtures <- fmap (sortOn snd) $ getGitFixtures >>= mapM addSize
 
   forM_ fixtures $ \((fixture, loadFixture), size) -> do
-    files <- loadFixture
+    Fixture{files} <- loadFixture
     let label = fixture <> " (num_files=" <> show (length files) <> ", size=" <> renderSize size <> ")"
     withGitRepo files $
       defaultMain

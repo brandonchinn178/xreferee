@@ -4,6 +4,8 @@ module XReferee.TestUtils.Git (
 
 import Control.Exception (onException)
 import Control.Monad (forM_)
+import Data.Text (Text)
+import Data.Text.IO qualified as Text
 import System.Directory (
   createDirectoryIfMissing,
   withCurrentDirectory,
@@ -13,7 +15,7 @@ import System.FilePath (takeDirectory, (</>))
 import System.IO.Temp (withSystemTempDirectory)
 import System.Process qualified as Process
 
-withGitRepo :: [(FilePath, String)] -> IO a -> IO a
+withGitRepo :: [(FilePath, Text)] -> IO a -> IO a
 withGitRepo files action =
   withSystemTempDirectory "git.XXXX" $ \tmpdir -> do
     let gitdir = tmpdir </> "repo"
@@ -25,7 +27,7 @@ withGitRepo files action =
       forM_ files $ \(relpath, content) -> do
         let fp = gitdir </> relpath
         createDirectoryIfMissing True (takeDirectory fp)
-        writeFile fp content
+        Text.writeFile fp content
       git ["add", "."]
       git ["commit", "-m", "Initial commit", "--allow-empty", "--no-verify"]
       action
