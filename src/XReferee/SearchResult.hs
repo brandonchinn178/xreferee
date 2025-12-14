@@ -22,7 +22,8 @@ import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Data.Text.IO qualified as Text
+import Data.Text.Lazy qualified as TextL
+import Data.Text.Lazy.IO qualified as TextL
 import System.Exit (ExitCode (..))
 import System.IO qualified as IO
 import System.Process qualified as Process
@@ -100,23 +101,23 @@ findRefsFromGit opts = do
           , Process.std_err = Process.CreatePipe
           }
   Process.withCreateProcess proc $ \_ stdoutHandle stderrHandle ph -> do
-    stdout <- maybe (pure "") Text.hGetContents stdoutHandle
-    result <- evaluate $!! mconcat . map parseLine . Text.lines $ stdout
+    stdout <- maybe (pure "") TextL.hGetContents stdoutHandle
+    result <- evaluate $!! mconcat . map parseLine . TextL.lines $ stdout
     code <- Process.waitForProcess ph
-    stderr <- maybe (pure "") Text.hGetContents stderrHandle
-    Text.hPutStr IO.stderr stderr
-    when (code /= ExitSuccess && (not . Text.null) stderr) $
+    stderr <- maybe (pure "") TextL.hGetContents stderrHandle
+    TextL.hPutStr IO.stderr stderr
+    when (code /= ExitSuccess && (not . TextL.null) stderr) $
       -- TODO: Proper error?
       errorWithoutStackTrace "git grep failed"
     pure result
   where
     parseLine line = fromMaybe mempty $ do
-      filepath : lineNumStr : rest <- pure $ Text.splitOn ":" line
-      lineNum <- readMaybe $ Text.unpack lineNumStr
-      let (anchors, references) = parseLabels $ Text.intercalate ":" rest
+      filepath : lineNumStr : rest <- pure $ TextL.splitOn ":" line
+      lineNum <- readMaybe $ TextL.unpack lineNumStr
+      let (anchors, references) = parseLabels $ TextL.intercalate ":" rest
           loc =
             LabelLoc
-              { filepath = Text.unpack filepath
+              { filepath = TextL.unpack filepath
               , lineNum
               }
       pure
@@ -125,26 +126,26 @@ findRefsFromGit opts = do
           , references = Map.fromListWith (<>) [(ref, [loc]) | ref <- references]
           }
 
-parseLabels :: Text -> ([Anchor], [Reference])
+parseLabels :: TextL.Text -> ([Anchor], [Reference])
 parseLabels = parseStart [] []
   where
     parseStart anchors refs s0 =
-      let (_, s1) = Text.break (`elem` [Text.head anchorStart, Text.head refStart]) s0
+      let (_, s1) = TextL.break (`elem` [Text.head anchorStart, Text.head refStart]) s0
        in case (Left <$> parseAnchor s1) <|> (Right <$> parseRef s1) of
-            Just (Left (name, s2)) -> parseStart (Anchor name : anchors) refs s2
-            Just (Right (name, s2)) -> parseStart anchors (Reference name : refs) s2
+            Just (Left (name, s2)) -> parseStart (Anchor (TextL.toStrict name) : anchors) refs s2
+            Just (Right (name, s2)) -> parseStart anchors (Reference (TextL.toStrict name) : refs) s2
             Nothing
-              | Text.null s1 -> (anchors, refs)
-              | otherwise -> parseStart anchors refs (Text.drop 1 s1)
+              | TextL.null s1 -> (anchors, refs)
+              | otherwise -> parseStart anchors refs (TextL.drop 1 s1)
 
     parseAnchor = parseMarker anchorStart anchorEnd
     parseRef = parseMarker refStart refEnd
     parseMarker start end s0 = do
-      s1 <- Text.stripPrefix start s0
-      (name, s2) <- breakOn' end s1
-      guard $ (not . Text.null) name
+      s1 <- TextL.stripPrefix (TextL.fromStrict start) s0
+      (name, s2) <- breakOn' (TextL.fromStrict end) s1
+      guard $ (not . TextL.null) name
       pure (name, s2)
 
     -- Same as breakOn, except returns Nothing if the delim isn't found, and
     -- the snd string doesn't start with the delim.
-    breakOn' delim = traverse (Text.stripPrefix delim) . Text.breakOn delim
+    breakOn' delim = traverse (TextL.stripPrefix delim) . TextL.breakOn delim
