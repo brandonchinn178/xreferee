@@ -53,6 +53,7 @@ test-suite referee-tests
   other-modules:
     XReferee.SearchResultSpec
     XReferee.ReportSpec
+    XReferee.GitUtils
     XReferee.TestUtils
   build-depends:
       base

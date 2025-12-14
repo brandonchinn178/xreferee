@@ -4,19 +4,12 @@
 
 module XReferee.SearchResultSpec (spec) where
 
-import Control.Exception (onException)
-import Control.Monad (forM_)
 import Data.Map qualified as Map
 import Skeletest
 import Skeletest.Predicate qualified as P
 import System.Directory (
-  createDirectoryIfMissing,
   withCurrentDirectory,
  )
-import System.Exit (ExitCode (..))
-import System.FilePath (takeDirectory, (</>))
-import System.IO.Temp (withSystemTempDirectory)
-import System.Process qualified as Process
 import XReferee.SearchResult (
   LabelLoc (..),
   SearchOpts (..),
@@ -24,6 +17,7 @@ import XReferee.SearchResult (
   findRefsFromGit,
  )
 import XReferee.TestUtils (anchor, defaultOpts)
+import XReferee.GitUtils (withGitRepo)
 
 spec :: Spec
 spec = do
@@ -60,42 +54,3 @@ spec = do
                 }
         withCurrentDirectory "python/a/b/" $
           findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
-
-data GitRepo = GitRepo
-  { dir :: FilePath
-  , logFile :: FilePath
-  }
-
-withGitRepo :: [(FilePath, String)] -> IO a -> IO a
-withGitRepo files action =
-  withSystemTempDirectory "git.XXXX" $ \tmpdir -> do
-    let gitdir = tmpdir </> "repo"
-        gitlog = tmpdir </> "git.log"
-    createDirectoryIfMissing True gitdir
-    withCurrentDirectory gitdir . captureLogs gitlog $ do
-      let repo = GitRepo{dir = gitdir, logFile = gitlog}
-      runGit repo ["init"]
-      forM_ files $ \(fp, s) -> addFile repo fp s
-      runGit repo ["commit", "-m", "Initial commit", "--no-verify"]
-      action
-  where
-    -- TODO: remove when skeletest captures stdout/stderr
-    -- https://github.com/brandonchinn178/skeletest/issues/1
-    captureLogs logFile f = f `onException` (readFile logFile >>= putStrLn)
-
-addFile :: GitRepo -> FilePath -> String -> IO ()
-addFile repo relpath content = do
-  let fp = repo.dir </> relpath
-  createDirectoryIfMissing True (takeDirectory fp)
-  writeFile fp content
-  runGit repo ["add", relpath]
-
-runGit :: GitRepo -> [String] -> IO ()
-runGit repo args = do
-  (code, stdout, stderr) <- Process.readProcessWithExitCode "git" args ""
-  appendFile repo.logFile stdout
-  appendFile repo.logFile stderr
-  case code of
-    ExitSuccess -> pure ()
-    ExitFailure n -> do
-      fail $ "command exited with code " <> show n <> ": " <> show ("git" : args)
