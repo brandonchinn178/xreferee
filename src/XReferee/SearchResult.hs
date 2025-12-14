@@ -88,7 +88,7 @@ findRefsFromGit opts = do
   let args =
         concat
           [ ["grep"]
-          , ["--full-name", "--line-number"]
+          , ["-z", "--full-name", "--line-number", "--column"]
           , ["-I"] -- ignore binary files
           , ["--fixed-strings", "-e", Text.unpack anchorStart, "-e", Text.unpack refStart]
           , ["--"]
@@ -112,9 +112,10 @@ findRefsFromGit opts = do
     pure result
   where
     parseLine line = fromMaybe mempty $ do
-      filepath : lineNumStr : rest <- pure $ TextL.splitOn ":" line
+      [filepath, lineNumStr, colNumStr, rest] <- pure $ TextL.splitOn "\0" line
       lineNum <- readMaybe $ TextL.unpack lineNumStr
-      let (anchors, references) = parseLabels $ TextL.intercalate ":" rest
+      colNum <- readMaybe $ TextL.unpack colNumStr
+      let (anchors, references) = parseLabels $ TextL.drop (colNum - 1) rest
           loc =
             LabelLoc
               { filepath = TextL.unpack filepath
@@ -127,16 +128,20 @@ findRefsFromGit opts = do
           }
 
 parseLabels :: TextL.Text -> ([Anchor], [Reference])
-parseLabels = parseStart [] []
+parseLabels = parseSomeMarker [] []
   where
-    parseStart anchors refs s0 =
-      let (_, s1) = TextL.break (`elem` [Text.head anchorStart, Text.head refStart]) s0
+    markerStarts = map Text.head [anchorStart, refStart]
+
+    parseSomeMarker anchors refs s0 =
+      let s1 = dropNonMarker s0
        in case (Left <$> parseAnchor s1) <|> (Right <$> parseRef s1) of
-            Just (Left (name, s2)) -> parseStart (Anchor (TextL.toStrict name) : anchors) refs s2
-            Just (Right (name, s2)) -> parseStart anchors (Reference (TextL.toStrict name) : refs) s2
+            Just (Left (name, s2)) -> parseSomeMarker (Anchor (TextL.toStrict name) : anchors) refs s2
+            Just (Right (name, s2)) -> parseSomeMarker anchors (Reference (TextL.toStrict name) : refs) s2
             Nothing
               | TextL.null s1 -> (anchors, refs)
-              | otherwise -> parseStart anchors refs (TextL.drop 1 s1)
+              | otherwise -> parseSomeMarker anchors refs (TextL.drop 1 s1)
+
+    dropNonMarker = snd . TextL.break (`elem` markerStarts)
 
     parseAnchor = parseMarker anchorStart anchorEnd
     parseRef = parseMarker refStart refEnd

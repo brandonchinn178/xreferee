@@ -61,6 +61,23 @@ spec = do
             expected = SearchResult{anchors = mempty, references = mempty}
         findRefsFromGit opts `shouldSatisfy` P.returns (P.eq expected)
 
+    it "handles files with special characters" $ do
+      let files =
+            [ ("foo:49:.txt", "#(ref:test1)")
+            , ("foo\\.txt", "#(ref:test2)")
+            ]
+      withGitRepo files $ do
+        let expected =
+              SearchResult
+                { anchors =
+                    Map.fromList
+                      [ anchor "test1" [loc "foo:49:.txt" 1]
+                      , anchor "test2" [loc "foo\\.txt" 1]
+                      ]
+                , references = mempty
+                }
+        findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
+
     it "finds references from subdirectory" $ do
       let files =
             [ ("python/a/b/foo_anchor.py", "FOO = 1 # #(ref:foo)")
