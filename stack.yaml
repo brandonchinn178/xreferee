@@ -1,0 +1,5 @@
+snapshot: nightly-2025-12-10
+
+ghc-options:
+  "$everything": -O2
+  "$locals": -Werror

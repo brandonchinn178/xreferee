@@ -10,6 +10,7 @@ import Skeletest.Predicate qualified as P
 import System.Directory (
   withCurrentDirectory,
  )
+import XReferee.GitUtils (withGitRepo)
 import XReferee.SearchResult (
   LabelLoc (..),
   SearchOpts (..),
@@ -17,7 +18,6 @@ import XReferee.SearchResult (
   findRefsFromGit,
  )
 import XReferee.TestUtils (anchor, defaultOpts)
-import XReferee.GitUtils (withGitRepo)
 
 spec :: Spec
 spec = do

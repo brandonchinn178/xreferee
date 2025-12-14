@@ -49,23 +49,13 @@ jobs:
       -
         uses: haskell-actions/setup@v2
       -
-        name: cabal configure
-        run:
-          cabal configure
-            --enable-tests
-            --test-show-details=streaming
-      -
-        name: cabal update
-        run: cabal update
-      -
         name: configure git for testing
         run: |
           git config set advice.defaultBranchName false
           git config --global user.email "ci@example.com"
           git config --global user.name "CI"
       -
-        name: build + test
-        run: cabal build all && cabal test all
+        run: stack build --test
       -
         uses: haskell-actions/parse-cabal-file@v1
         id: cabal_file
@@ -74,7 +64,7 @@ jobs:
       -
         name: Build binary
         run: |
-          cabal install --installdir=./bin --install-method=copy
+          stack install --local-bin-path ./bin
           strip bin/xreferee
           cp bin/xreferee bin/xreferee-${version}-${target}
         env:
