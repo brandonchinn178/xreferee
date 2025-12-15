@@ -49,3 +49,25 @@ Alternatively, clone this repo, install the Haskell toolchain, and build it.
 # Run this command in CI or pre-commit hooks to validate all cross references
 xreferee
 ```
+
+## Comparison with other tools
+
+### [tagref](https://github.com/stepchowfun/tagref)
+
+`xreferee` uses `git grep` internally, which does the heavy lifting of searching, while `tagref` walks the file tree itself. Since `git grep` is heavily optimized, `xreferee` should have better performance.
+
+Using a git repo provisioned from the largest file in `data/fixtures/` with [hyperfine](https://github.com/sharkdp/hyperfine):
+
+```console
+$ hyperfine -N --warmup 10 --runs 200 xreferee tagref
+Benchmark 1: xreferee
+  Time (mean ± σ):     165.6 ms ±   5.6 ms    [User: 219.5 ms, System: 246.2 ms]
+  Range (min … max):   156.2 ms … 229.8 ms    200 runs
+
+Benchmark 2: tagref
+  Time (mean ± σ):     487.9 ms ±   9.4 ms    [User: 876.3 ms, System: 91.7 ms]
+  Range (min … max):   453.5 ms … 522.0 ms    200 runs
+
+Summary
+  xreferee ran 2.95 ± 0.12 times faster than tagref
+```
