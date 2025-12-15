@@ -1,9 +1,12 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
 
 import Control.Monad (forM_)
 import Criterion.Main
 import Data.List (sortOn)
+import Data.Map qualified as Map
 import System.Directory (findExecutable, getFileSize)
 import System.Process (readProcess)
 import XReferee.TestUtils.Fixtures (Fixture (..), getGitFixtures)
@@ -16,12 +19,18 @@ main = do
 
   fixtures <- fmap (sortOn snd) $ getGitFixtures >>= mapM addSize
 
-  forM_ fixtures $ \((fixture, loadFixture), size) -> do
-    Fixture{files} <- loadFixture
-    let label = fixture <> " (num_files=" <> show (length files) <> ", size=" <> renderSize size <> ")"
-    withGitRepo files $
+  forM_ fixtures $ \((path, loadFixture), size) -> do
+    putStrLn $ replicate 80 '*'
+    putStrLn $ path
+    fixture <- loadFixture
+    putStrLn $ "  - Size: " <> renderSize size
+    putStrLn $ "  - Total files: " <> (show . length) fixture.files
+    putStrLn $ "  - Total anchors: " <> (show . length) fixture.anchors
+    putStrLn $ "  - Total references: " <> (show . length . concat . Map.elems) fixture.refs
+    putStrLn $ replicate 80 '*'
+    withGitRepo fixture.files $
       defaultMain
-        [ bench label . whnfIO $ do
+        [ bench "xreferee" . whnfIO $ do
             -- should be checked in IntegrationSpec
             _ <- readProcess xreferee [] ""
             pure ()
