@@ -50,7 +50,7 @@ jobs:
         with:
           enable-stack: true
       -
-        name: configure git for testing
+        name: Configure git for testing
         run: |
           git config set advice.defaultBranchName false
           git config --global user.email "ci@example.com"
@@ -71,6 +71,15 @@ jobs:
         env:
           version: ${{ steps.cabal_file.outputs.version }}
           target: ${{ env.target }}
+      -
+        # Compress arm64 binaries
+        # https://discourse.haskell.org/t/arm64-binaries-too-large/13416
+        name: Compress binary
+        uses: crazy-max/ghaction-upx@v3
+        with:
+          version: latest
+          files: ./bin/xreferee-*
+          args: -fq
       -
         name: Store binary
         uses: actions/upload-artifact@v4
