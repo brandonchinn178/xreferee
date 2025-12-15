@@ -1,5 +1,8 @@
 snapshot: nightly-2025-12-10
 
+configure-options:
+  "$locals": [--enable-split-sections]
+
 ghc-options:
   "$everything": -O2
   "$locals": -Werror
