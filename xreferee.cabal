@@ -45,13 +45,6 @@ executable xreferee
   default-language: GHC2021
   ghc-options: -Wall -Wcompat
 
-  -- Optimize executable size on arm64
-  ghc-options: -optl-s
-  if os(linux)
-    ghc-options: -optl-Wl,-gc-sections
-  if os(osx)
-    ghc-options: -optl-Wl,-dead_strip
-
 test-suite referee-tests
   type: exitcode-stdio-1.0
   ghc-options: -F -pgmF=skeletest-preprocessor
