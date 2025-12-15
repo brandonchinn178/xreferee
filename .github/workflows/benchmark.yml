@@ -22,6 +22,6 @@ jobs:
           git config --global user.email "ci@example.com"
           git config --global user.name "CI"
       -
-        run: stack build xreferee-e2e
+        run: stack build :xreferee-e2e
       -
         run: stack exec xreferee-e2e
