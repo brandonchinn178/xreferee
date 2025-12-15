@@ -5,6 +5,9 @@ Validate cross references throughout a git repo.
 It's often useful to link two different locations in a codebase, and it might not always be possible to enforce it by importing a common source of truth. Some examples:
 * Keeping two constants in sync across files in two different languages
 * Linking an implementation to markdown files or comments documenting the design
+* Referencing an invariant documented on a field definition at the call-site
+
+See GHC's wiki on how they've found cross references helpful: https://gitlab.haskell.org/ghc/ghc/-/wikis/commentary/coding-style#2-using-notes.
 
 You can use this tool in CI or pre-commit hooks to validate that cross references across a repository are valid. For example:
 
