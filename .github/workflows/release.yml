@@ -31,7 +31,7 @@ jobs:
       - build
 
     env:
-      VERSION: ${{ needs.ci.outputs.version }}
+      VERSION: ${{ needs.build.outputs.version }}
 
     steps:
       -
