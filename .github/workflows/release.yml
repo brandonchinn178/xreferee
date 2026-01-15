@@ -37,25 +37,11 @@ jobs:
       -
         uses: actions/checkout@v5
       -
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
-          name: xreferee-binary-linux-x86_64
           path: ./.release/
-      -
-        uses: actions/download-artifact@v5
-        with:
-          name: xreferee-binary-linux-arm64
-          path: ./.release/
-      -
-        uses: actions/download-artifact@v5
-        with:
-          name: xreferee-binary-osx-x86_64
-          path: ./.release/
-      -
-        uses: actions/download-artifact@v5
-        with:
-          name: xreferee-binary-osx-arm64
-          path: ./.release/
+          pattern: xreferee-binary-*
+          merge-multiple: true
       -
         name: Generate release notes
         run:
