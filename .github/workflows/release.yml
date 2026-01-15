@@ -40,41 +40,43 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: xreferee-binary-linux-x86_64
-          path: ./bin/
+          path: ./.release/
       -
         uses: actions/download-artifact@v5
         with:
           name: xreferee-binary-linux-arm64
-          path: ./bin/
+          path: ./.release/
       -
         uses: actions/download-artifact@v5
         with:
           name: xreferee-binary-osx-x86_64
-          path: ./bin/
+          path: ./.release/
       -
         uses: actions/download-artifact@v5
         with:
           name: xreferee-binary-osx-arm64
-          path: ./bin/
+          path: ./.release/
       -
-        name: Get CHANGELOG section
-        run: |
-          sed '/^# Unreleased/,/^$/d' CHANGELOG.md > /tmp/changelog-without-unreleased
-          if [[ "$(head -n 1 /tmp/changelog-without-unreleased)" != "# v${VERSION}" ]]; then
-            echo "CHANGELOG doesn't look updated" >&2
-            exit 1
-          fi
-          sed '1 d; /^# v/,$ d' /tmp/changelog-without-unreleased > /tmp/changelog-body
+        name: Generate release notes
+        run:
+          scripts/release_notes.py generate
+            --release-version ${VERSION}
+            --bin linux-x86_64 .release/xreferee-${VERSION}-linux-x86_64
+            --bin linux-aarch64 .release/xreferee-${VERSION}-linux-arm64
+            --bin macos-x86_64 .release/xreferee-${VERSION}-osx-x86_64
+            --bin macos-aarch64 .release/xreferee-${VERSION}-osx-arm64
+            | tee .release/release-notes.md
+
       -
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ env.VERSION }}
-          body_path: /tmp/changelog-body
+          body_path: .release/release-notes.md
           draft: true
           target_commitish: ${{ github.sha }}
           files: |
-            bin/xreferee-${{ env.VERSION }}-linux-x86_64
-            bin/xreferee-${{ env.VERSION }}-linux-arm64
-            bin/xreferee-${{ env.VERSION }}-osx-x86_64
-            bin/xreferee-${{ env.VERSION }}-osx-arm64
+            .release/xreferee-${{ env.VERSION }}-linux-x86_64
+            .release/xreferee-${{ env.VERSION }}-linux-arm64
+            .release/xreferee-${{ env.VERSION }}-osx-x86_64
+            .release/xreferee-${{ env.VERSION }}-osx-arm64
           fail_on_unmatched_files: true

@@ -41,6 +41,8 @@ const MY_VERSION = 123
 
 Go to the GitHub releases page and download an artifact.
 
+Alternatively, use [dotslash](https://dotslash-cli.com/docs/) using the config in the GitHub release notes.
+
 Alternatively, clone this repo, install the Haskell toolchain, and build it.
 
 ## Usage
