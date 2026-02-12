@@ -16,7 +16,7 @@ jobs:
         with:
           enable-stack: true
       -
-        name: configure git for testing
+        name: Configure git for testing
         run: |
           git config set advice.defaultBranchName false
           git config --global user.email "ci@example.com"
