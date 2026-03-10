@@ -10,6 +10,7 @@ import Skeletest
 import XReferee.Report (makeReport, renderReport, reportFailure)
 import XReferee.SearchResult (
   Anchor (..),
+  ColumnRange (..),
   LabelLoc (..),
   Reference (..),
   SearchResult (..),
@@ -42,10 +43,12 @@ spec = do
             -- Manually iterate to show smaller errors
             forM_ (Map.toList expectedAnchors) $ \(anchor, locs) ->
               context (show anchor) $
-                Set.fromList (Map.findWithDefault [] anchor result.anchors) `shouldBe` Set.fromList locs
+                Set.fromList (toFileAndLine <$> Map.findWithDefault [] anchor result.anchors)
+                  `shouldBe` Set.fromList (toFileAndLine <$> locs)
             forM_ (Map.toList expectedRefs) $ \(ref, locs) ->
               context (show ref) $
-                Set.fromList (Map.findWithDefault [] ref result.references) `shouldBe` Set.fromList locs
+                Set.fromList (toFileAndLine <$> Map.findWithDefault [] ref result.references)
+                  `shouldBe` Set.fromList (toFileAndLine <$> locs)
           let report = makeReport result
           context fixturePath . context (Text.unpack $ renderReport report) $
             reportFailure report `shouldBe` False
@@ -54,4 +57,10 @@ spec = do
       LabelLoc
         { filepath = loc.file
         , lineNum = loc.lineNum
+        , columnRange = ColumnRange 0 0
         }
+
+    -- Ignore `LabelLoc.columnRange` for the purpose of integration tests,
+    -- since column ranges are not part of the report.
+    toFileAndLine :: LabelLoc -> (FilePath, Int)
+    toFileAndLine loc = (loc.filepath, loc.lineNum)

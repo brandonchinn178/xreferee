@@ -9,6 +9,7 @@ module XReferee.SearchResult (
   Anchor (..),
   Reference (..),
   Label (..),
+  ColumnRange (..),
   LabelLoc (..),
   findRefsFromGit,
 ) where
@@ -77,11 +78,21 @@ instance Label Reference where
 data LabelLoc = LabelLoc
   { filepath :: FilePath
   , lineNum :: Int
+  , columnRange :: ColumnRange
   }
   deriving (Show, Eq, Ord)
 
+data ColumnRange = ColumnRange
+  { start :: Int
+  , end :: Int
+  }
+  deriving (Show, Eq, Ord)
+
+instance NFData ColumnRange where
+  rnf (ColumnRange start end) = rnf start `seq` rnf end
+
 instance NFData LabelLoc where
-  rnf loc = rnf loc.filepath `seq` rnf loc.lineNum
+  rnf loc = rnf loc.filepath `seq` rnf loc.lineNum `seq` rnf loc.columnRange
 
 findRefsFromGit :: SearchOpts -> IO SearchResult
 findRefsFromGit opts = do
@@ -115,33 +126,55 @@ findRefsFromGit opts = do
       [filepath, lineNumStr, colNumStr, rest] <- pure $ TextL.splitOn "\0" line
       lineNum <- readMaybe $ TextL.unpack lineNumStr
       colNum <- readMaybe $ TextL.unpack colNumStr
-      let (anchors, references) = parseLabels $ TextL.drop (colNum - 1) rest
-          loc =
+      let (anchors, references) = parseLabels (TextL.drop (fromIntegral colNum - 1) rest) colNum
+          mkLoc columnRange =
             LabelLoc
               { filepath = TextL.unpack filepath
               , lineNum
+              , columnRange
               }
       pure
         SearchResult
-          { anchors = Map.fromListWith (<>) [(anchor, [loc]) | anchor <- anchors]
-          , references = Map.fromListWith (<>) [(ref, [loc]) | ref <- references]
+          { anchors = Map.fromListWith (<>) [(anchor, [mkLoc range]) | (anchor, range) <- anchors]
+          , references = Map.fromListWith (<>) [(ref, [mkLoc range]) | (ref, range) <- references]
           }
 
-parseLabels :: TextL.Text -> ([Anchor], [Reference])
+-- | Parse all labels from the given text.
+parseLabels ::
+  -- | The text to parse for labels.
+  TextL.Text ->
+  -- | The column number for the first character in the input text. Used to calculate the column numbers for the labels.
+  Int ->
+  ([(Anchor, ColumnRange)], [(Reference, ColumnRange)])
 parseLabels = parseSomeMarker [] []
   where
     markerStarts = map Text.head [anchorStart, refStart]
 
-    parseSomeMarker anchors refs s0 =
-      let s1 = dropNonMarker s0
+    parseSomeMarker ::
+      [(Anchor, ColumnRange)] ->
+      [(Reference, ColumnRange)] ->
+      TextL.Text ->
+      Int ->
+      ([(Anchor, ColumnRange)], [(Reference, ColumnRange)])
+    parseSomeMarker anchors refs s0 col0 =
+      -- Remove the prefix before the next marker, and update the column number accordingly.
+      let (prefix, s1) = TextL.break (`elem` markerStarts) s0
+          col1 = col0 + fromIntegral (TextL.length prefix)
        in case (Left <$> parseAnchor s1) <|> (Right <$> parseRef s1) of
-            Just (Left (name, s2)) -> parseSomeMarker (Anchor (TextL.toStrict name) : anchors) refs s2
-            Just (Right (name, s2)) -> parseSomeMarker anchors (Reference (TextL.toStrict name) : refs) s2
+            Just (Left (name, s2)) ->
+              let markerLen = Text.length anchorStart + fromIntegral (TextL.length name) + Text.length anchorEnd
+                  columnRange = ColumnRange{start = col1, end = col1 + markerLen - 1}
+                  -- Advance the column number to match the remaining string `s2`
+                  col2 = col1 + markerLen
+               in parseSomeMarker ((Anchor (TextL.toStrict name), columnRange) : anchors) refs s2 col2
+            Just (Right (name, s2)) ->
+              let markerLen = Text.length refStart + fromIntegral (TextL.length name) + Text.length refEnd
+                  columnRange = ColumnRange{start = col1, end = col1 + markerLen - 1}
+                  col2 = col1 + markerLen
+               in parseSomeMarker anchors ((Reference (TextL.toStrict name), columnRange) : refs) s2 col2
             Nothing
               | TextL.null s1 -> (anchors, refs)
-              | otherwise -> parseSomeMarker anchors refs (TextL.drop 1 s1)
-
-    dropNonMarker = snd . TextL.break (`elem` markerStarts)
+              | otherwise -> parseSomeMarker anchors refs (TextL.drop 1 s1) (col1 + 1)
 
     parseAnchor = parseMarker anchorStart anchorEnd
     parseRef = parseMarker refStart refEnd
