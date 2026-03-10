@@ -12,6 +12,7 @@ module XReferee.SearchResult (
   ColumnRange (..),
   LabelLoc (..),
   findRefsFromGit,
+  parseLabels,
 ) where
 
 import Control.Applicative ((<|>))
