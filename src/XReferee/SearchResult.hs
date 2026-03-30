@@ -90,6 +90,7 @@ findRefsFromGit opts = do
           [ ["grep"]
           , ["-z", "--full-name", "--line-number", "--column"]
           , ["-I"] -- ignore binary files
+          , ["--untracked"] -- include untracked files
           , ["--fixed-strings", "-e", Text.unpack anchorStart, "-e", Text.unpack refStart]
           , ["--"]
           , [":/"]
