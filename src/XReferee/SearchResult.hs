@@ -127,7 +127,7 @@ findRefsFromGit opts = do
       [filepath, lineNumStr, colNumStr, rest] <- pure $ TextL.splitOn "\0" line
       lineNum <- readMaybe $ TextL.unpack lineNumStr
       colNum <- readMaybe $ TextL.unpack colNumStr
-      let (anchors, references) = parseLabels (TextL.drop (fromIntegral colNum - 1) rest) colNum
+      let (anchors, references) = parseLabels rest colNum
           mkLoc columnRange =
             LabelLoc
               { filepath = TextL.unpack filepath
@@ -144,10 +144,15 @@ findRefsFromGit opts = do
 parseLabels ::
   -- | The text to parse for labels.
   TextL.Text ->
-  -- | The column number for the first character in the input text. Used to calculate the column numbers for the labels.
+  -- | The column number of the first label in the input text. Used to calculate the column numbers for the labels.
   Int ->
   ([(Anchor, ColumnRange)], [(Reference, ColumnRange)])
-parseLabels = parseSomeMarker [] []
+parseLabels text col =
+  parseSomeMarker
+    []
+    []
+    (TextL.drop (fromIntegral col - 1) text)
+    col
   where
     markerStarts = map Text.head [anchorStart, refStart]
 
