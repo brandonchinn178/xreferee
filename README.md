@@ -2,6 +2,11 @@
 
 Validate cross references throughout a git repo.
 
+This repo hosts the CLI tool.
+A VSCode extension is available in the [marketplace](https://marketplace.visualstudio.com/items?itemName=dcastro.xreferee).
+
+## Overview
+
 It's often useful to link two different locations in a codebase, and it might not always be possible to enforce it by importing a common source of truth. Some examples:
 * Keeping two constants in sync across files in two different languages
 * Linking an implementation to markdown files or comments documenting the design
