@@ -2,11 +2,6 @@
 
 Validate cross references throughout a git repo.
 
-This repo hosts the CLI tool.
-A VSCode extension is available in the [marketplace](https://marketplace.visualstudio.com/items?itemName=dcastro.xreferee).
-
-## Overview
-
 It's often useful to link two different locations in a codebase, and it might not always be possible to enforce it by importing a common source of truth. Some examples:
 * Keeping two constants in sync across files in two different languages
 * Linking an implementation to markdown files or comments documenting the design
@@ -49,6 +44,14 @@ Go to the GitHub releases page and download an artifact.
 Alternatively, use [dotslash](https://dotslash-cli.com/docs/) using the config in the GitHub release notes.
 
 Alternatively, clone this repo, install the Haskell toolchain, and build it.
+
+### Editor integration
+
+An LSP server is available [here](https://github.com/dcastro/lsp-xreferee).
+
+Supported editors:
+* [VSCode](https://marketplace.visualstudio.com/items?itemName=dcastro.xreferee)
+
 
 ## Usage
 
