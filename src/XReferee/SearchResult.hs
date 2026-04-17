@@ -153,23 +153,16 @@ parseLabels ::
   Int ->
   ([(Anchor, ColumnRange)], [(Reference, ColumnRange)])
 parseLabels text col =
-  parseSomeMarker
-    []
-    []
-    (LBS.drop (fromIntegral col - 1) text)
-    col
+  partitionUnfoldr parseSomeMarker $
+    ( LBS.drop (fromIntegral col - 1) text
+    , col
+    )
   where
     markerStarts = map (LBS.head . toLBS) [anchorStart, refStart]
     toLBS = LBS.fromStrict . Text.encodeUtf8
     toText = Text.decodeUtf8 . LBS.toStrict
 
-    parseSomeMarker ::
-      [(Anchor, ColumnRange)] ->
-      [(Reference, ColumnRange)] ->
-      LazyByteString ->
-      Int ->
-      ([(Anchor, ColumnRange)], [(Reference, ColumnRange)])
-    parseSomeMarker anchors refs s0 col0 =
+    parseSomeMarker (s0, col0) =
       -- Remove the prefix before the next marker, and update the column number accordingly.
       let (prefix, s1) = LBS.break (`elem` markerStarts) s0
           col1 = col0 + fromIntegral (LBS.length prefix)
@@ -179,15 +172,15 @@ parseLabels text col =
                   columnRange = ColumnRange{start = col1, end = col1 + markerLen - 1}
                   -- Advance the column number to match the remaining string `s2`
                   col2 = col1 + markerLen
-               in parseSomeMarker ((Anchor (toText name), columnRange) : anchors) refs s2 col2
+               in Just (Left (Anchor (toText name), columnRange), (s2, col2))
             Just (Right (name, s2)) ->
               let markerLen = Text.length refStart + fromIntegral (LBS.length name) + Text.length refEnd
                   columnRange = ColumnRange{start = col1, end = col1 + markerLen - 1}
                   col2 = col1 + markerLen
-               in parseSomeMarker anchors ((Reference (toText name), columnRange) : refs) s2 col2
+               in Just (Right (Reference (toText name), columnRange), (s2, col2))
             Nothing
-              | LBS.null s1 -> (anchors, refs)
-              | otherwise -> parseSomeMarker anchors refs (LBS.drop 1 s1) (col1 + 1)
+              | LBS.null s1 -> Nothing
+              | otherwise -> parseSomeMarker (LBS.drop 1 s1, col1 + 1)
 
     parseAnchor = parseMarker anchorStart anchorEnd
     parseRef = parseMarker refStart refEnd
@@ -198,6 +191,15 @@ parseLabels text col =
       pure (name, s2)
 
 {----- Utilities -----}
+
+partitionUnfoldr :: (s -> Maybe (Either a b, s)) -> s -> ([a], [b])
+partitionUnfoldr f =
+  let go !as !bs !s =
+        case f s of
+          Just (Left a, s') -> go (a : as) bs s'
+          Just (Right b, s') -> go as (b : bs) s'
+          Nothing -> (as, bs)
+   in go [] []
 
 {- | Split on the given delimiter
 
