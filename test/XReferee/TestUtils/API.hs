@@ -19,6 +19,7 @@ defaultOpts :: SearchOpts
 defaultOpts =
   SearchOpts
     { ignores = []
+    , includeUntracked = False
     }
 
 anchor :: Text -> [LabelLoc] -> (Anchor, [LabelLoc])

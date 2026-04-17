@@ -31,6 +31,7 @@ import Text.Read (readMaybe)
 
 data SearchOpts = SearchOpts
   { ignores :: [Text]
+  , includeUntracked :: Bool
   }
 
 -- Customize? https://github.com/brandonchinn178/xreferee/issues/11
@@ -90,7 +91,7 @@ findRefsFromGit opts = do
           [ ["grep"]
           , ["-z", "--full-name", "--line-number", "--column"]
           , ["-I"] -- ignore binary files
-          , ["--untracked"] -- include untracked files
+          , ["--untracked" | opts.includeUntracked] -- include untracked files
           , ["--fixed-strings", "-e", Text.unpack anchorStart, "-e", Text.unpack refStart]
           , ["--"]
           , [":/"]

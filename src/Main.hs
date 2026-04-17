@@ -34,6 +34,12 @@ cliOptions =
           , Opt.short 'I'
           , Opt.help "Git glob specs for paths to ignore"
           ]
+      includeUntracked <-
+        Opt.switch . mconcat $
+          [ Opt.long "include-untracked"
+          , Opt.short 'U'
+          , Opt.help "Include git untracked files in the search"
+          ]
       pure SearchOpts{..}
 
 {----- Entrypoint -----}
