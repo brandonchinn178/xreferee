@@ -38,6 +38,8 @@ spec = do
       let files =
             [ ("python/a/b/foo_anchor.py", "FOO = 1 # #(ref:foo) #(ref:foo) #(ref:foo2)")
             , ("javascript/c/d/foo_ref.js", "const FOO = 1 @(ref:foo) @(ref:foo) @(ref:foo2)")
+            , ("mixed_anchor_first.sh", "FOO=1 # #(ref:mixed1) @(ref:mixed2)")
+            , ("mixed_ref_first.sh", "FOO=1 # @(ref:mixed1) #(ref:mixed2)")
             ]
       withGitRepo files $ do
         let expected =
@@ -46,11 +48,15 @@ spec = do
                     Map.fromList
                       [ anchor "foo" [loc' "python/a/b/foo_anchor.py" 1 (11, 20), loc' "python/a/b/foo_anchor.py" 1 (22, 31)]
                       , anchor "foo2" [loc' "python/a/b/foo_anchor.py" 1 (33, 43)]
+                      , anchor "mixed1" [loc' "mixed_anchor_first.sh" 1 (9, 21)]
+                      , anchor "mixed2" [loc' "mixed_ref_first.sh" 1 (23, 35)]
                       ]
                 , references =
                     Map.fromList
                       [ ref "foo" [loc' "javascript/c/d/foo_ref.js" 1 (15, 24), loc' "javascript/c/d/foo_ref.js" 1 (26, 35)]
                       , ref "foo2" [loc' "javascript/c/d/foo_ref.js" 1 (37, 47)]
+                      , ref "mixed1" [loc' "mixed_ref_first.sh" 1 (9, 21)]
+                      , ref "mixed2" [loc' "mixed_anchor_first.sh" 1 (23, 35)]
                       ]
                 }
         findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
