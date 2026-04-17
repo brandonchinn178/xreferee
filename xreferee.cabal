@@ -28,6 +28,7 @@ library
     XReferee.SearchResult
   build-depends:
       base < 5
+    , bytestring
     , containers
     , deepseq
     , process
