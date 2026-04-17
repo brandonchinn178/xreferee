@@ -45,6 +45,14 @@ Alternatively, use [dotslash](https://dotslash-cli.com/docs/) using the config i
 
 Alternatively, clone this repo, install the Haskell toolchain, and build it.
 
+### Editor integration
+
+An LSP server is available [here](https://github.com/dcastro/lsp-xreferee).
+
+Supported editors:
+* [VSCode](https://marketplace.visualstudio.com/items?itemName=dcastro.xreferee)
+
+
 ## Usage
 
 ```shell
