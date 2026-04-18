@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -10,22 +12,27 @@ module XReferee.SearchResult (
   Reference (..),
   Label (..),
   ColumnRange (..),
+  ColNum,
   LabelLoc (..),
   findRefsFromGit,
   parseLabels,
 ) where
 
-import Control.Applicative ((<|>))
 import Control.DeepSeq (NFData (..), ($!!))
 import Control.Exception (evaluate)
 import Control.Monad (guard, when)
+import Data.Bitraversable (bitraverse)
+import Data.ByteString.Lazy (LazyByteString)
+import Data.ByteString.Lazy qualified as LBS
+import Data.ByteString.Lazy.Char8 qualified as LBS.Char8
+import Data.Int (Int64)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Data.Text.Lazy qualified as TextL
-import Data.Text.Lazy.IO qualified as TextL
+import Data.Text.Encoding qualified as Text
+import GHC.Records (HasField (..))
 import System.Exit (ExitCode (..))
 import System.IO qualified as IO
 import System.Process qualified as Process
@@ -84,9 +91,11 @@ data LabelLoc = LabelLoc
   }
   deriving (Show, Eq, Ord)
 
+type ColNum = Int
+
 data ColumnRange = ColumnRange
-  { start :: Int
-  , end :: Int
+  { start :: ColNum
+  , end :: ColNum
   }
   deriving (Show, Eq, Ord)
 
@@ -115,24 +124,25 @@ findRefsFromGit opts = do
           , Process.std_err = Process.CreatePipe
           }
   Process.withCreateProcess proc $ \_ stdoutHandle stderrHandle ph -> do
-    stdout <- maybe (pure "") TextL.hGetContents stdoutHandle
-    result <- evaluate $!! mconcat . map parseLine . TextL.lines $ stdout
+    stdout <- maybe (pure "") LBS.hGetContents stdoutHandle
+    result <- evaluate $!! mconcat . map parseLine . LBS.Char8.lines $ stdout
     code <- Process.waitForProcess ph
-    stderr <- maybe (pure "") TextL.hGetContents stderrHandle
-    TextL.hPutStr IO.stderr stderr
-    when (code /= ExitSuccess && (not . TextL.null) stderr) $
+    stderr <- maybe (pure "") LBS.hGetContents stderrHandle
+    LBS.hPutStr IO.stderr stderr
+    when (code /= ExitSuccess && (not . LBS.null) stderr) $
       -- TODO: Proper error?
       errorWithoutStackTrace "git grep failed"
     pure result
   where
     parseLine line = fromMaybe mempty $ do
-      [filepath, lineNumStr, colNumStr, rest] <- pure $ TextL.splitOn "\0" line
-      lineNum <- readMaybe $ TextL.unpack lineNumStr
-      colNum <- readMaybe $ TextL.unpack colNumStr
+      -- Split on \NUL characters
+      [filepath, lineNumStr, colNumStr, rest] <- pure $ LBS.split 0 line
+      lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
+      colNum <- readMaybe $ LBS.Char8.unpack colNumStr
       let (anchors, references) = parseLabels rest colNum
           mkLoc columnRange =
             LabelLoc
-              { filepath = TextL.unpack filepath
+              { filepath = LBS.Char8.unpack filepath
               , lineNum
               , columnRange
               }
@@ -142,56 +152,137 @@ findRefsFromGit opts = do
           , references = Map.fromListWith (<>) [(ref, [mkLoc range]) | (ref, range) <- references]
           }
 
--- | Parse all labels from the given text.
 parseLabels ::
-  -- | The text to parse for labels.
-  TextL.Text ->
-  -- | The column number of the first label in the input text. Used to calculate the column numbers for the labels.
-  Int ->
+  LazyByteString ->
+  ColNum ->
   ([(Anchor, ColumnRange)], [(Reference, ColumnRange)])
-parseLabels text col =
-  parseSomeMarker
-    []
-    []
-    (TextL.drop (fromIntegral col - 1) text)
-    col
+parseLabels s0 col0 =
+  partitionUnfoldr parseSomeMarker $
+    ParseState
+      { str = LBS.drop (fromIntegral col0 - 1) s0
+      , col = col0
+      }
   where
-    markerStarts = map Text.head [anchorStart, refStart]
+    toLBS = LBS.fromStrict . Text.encodeUtf8
+    toText = Text.decodeUtf8 . LBS.toStrict
 
-    parseSomeMarker ::
-      [(Anchor, ColumnRange)] ->
-      [(Reference, ColumnRange)] ->
-      TextL.Text ->
-      Int ->
-      ([(Anchor, ColumnRange)], [(Reference, ColumnRange)])
-    parseSomeMarker anchors refs s0 col0 =
-      -- Remove the prefix before the next marker, and update the column number accordingly.
-      let (prefix, s1) = TextL.break (`elem` markerStarts) s0
-          col1 = col0 + fromIntegral (TextL.length prefix)
-       in case (Left <$> parseAnchor s1) <|> (Right <$> parseRef s1) of
-            Just (Left (name, s2)) ->
-              let markerLen = Text.length anchorStart + fromIntegral (TextL.length name) + Text.length anchorEnd
-                  columnRange = ColumnRange{start = col1, end = col1 + markerLen - 1}
-                  -- Advance the column number to match the remaining string `s2`
-                  col2 = col1 + markerLen
-               in parseSomeMarker ((Anchor (TextL.toStrict name), columnRange) : anchors) refs s2 col2
-            Just (Right (name, s2)) ->
-              let markerLen = Text.length refStart + fromIntegral (TextL.length name) + Text.length refEnd
-                  columnRange = ColumnRange{start = col1, end = col1 + markerLen - 1}
-                  col2 = col1 + markerLen
-               in parseSomeMarker anchors ((Reference (TextL.toStrict name), columnRange) : refs) s2 col2
-            Nothing
-              | TextL.null s1 -> (anchors, refs)
-              | otherwise -> parseSomeMarker anchors refs (TextL.drop 1 s1) (col1 + 1)
+    anchorStartBS = toLBS anchorStart
+    anchorEndBS = toLBS anchorEnd
+    refStartBS = toLBS refStart
+    refEndBS = toLBS refEnd
 
-    parseAnchor = parseMarker anchorStart anchorEnd
-    parseRef = parseMarker refStart refEnd
-    parseMarker start end s0 = do
-      s1 <- TextL.stripPrefix (TextL.fromStrict start) s0
-      (name, s2) <- breakOn' (TextL.fromStrict end) s1
-      guard $ (not . TextL.null) name
-      pure (name, s2)
+    -- TODO: When anchorStart/refStart are customizable, make sure to validate
+    -- that they're non-empty
+    anchorStartChar = LBS.head anchorStartBS
+    refStartChar = LBS.head refStartBS
 
-    -- Same as breakOn, except returns Nothing if the delim isn't found, and
-    -- the snd string doesn't start with the delim.
-    breakOn' delim = traverse (TextL.stripPrefix delim) . TextL.breakOn delim
+    parseSomeMarker state = do
+      let anchorIndex = LBS.elemIndex anchorStartChar state.str
+          refIndex = LBS.elemIndex refStartChar state.str
+      case minMaybe anchorIndex refIndex of
+        -- No more matches; stop the loop
+        Nothing -> Nothing
+        -- Found an anchor or ref
+        Just eIndex -> do
+          case bitraverse (parseAnchor state) (parseRef state) eIndex of
+            -- Successful parse; return
+            Just eResult -> Just $ distributeEither eResult
+            -- False positive; try again
+            Nothing -> do
+              let n = fromEither eIndex + 1
+              parseSomeMarker (state.drop n)
+      where
+        fromEither = either id id
+
+        distributeEither :: Either (a, c) (b, c) -> (Either a b, c)
+        distributeEither = \case
+          Left (a, c) -> (Left a, c)
+          Right (b, c) -> (Right b, c)
+
+    parseAnchor = parseMarker (Anchor, anchorStartBS, anchorEndBS)
+    parseRef = parseMarker (Reference, refStartBS, refEndBS)
+    parseMarker (f, start, end) state0 index = do
+      let state1 = state0.drop index
+      state2 <- state1.stripPrefix start
+      (name, state3) <- state2.splitOnce end
+      guard $ (not . LBS.null) name
+      let marker = (f . toText) name
+          range =
+            ColumnRange
+              { start = state1.col
+              , end = state3.col - 1
+              }
+      Just ((marker, range), state3)
+
+data ParseState = ParseState
+  { str :: !LazyByteString
+  , col :: !ColNum
+  }
+instance HasField "drop" ParseState (Int64 -> ParseState) where
+  getField state n =
+    ParseState
+      { str = LBS.drop n state.str
+      , col = state.col + fromIntegral n
+      }
+instance HasField "stripPrefix" ParseState (LazyByteString -> Maybe ParseState) where
+  getField state pre = go <$> LBS.stripPrefix pre state.str
+    where
+      go str' =
+        ParseState
+          { str = str'
+          , col = state.col + fromIntegral (LBS.length pre)
+          }
+instance HasField "splitOnce" ParseState (LazyByteString -> Maybe (LazyByteString, ParseState)) where
+  getField state delim = go <$> splitOnce delim state.str
+    where
+      go (res, str') =
+        let state' =
+              ParseState
+                { str = str'
+                , col = state.col + fromIntegral (LBS.length res + LBS.length delim)
+                }
+         in (res, state')
+
+{----- Utilities -----}
+
+partitionUnfoldr :: (s -> Maybe (Either a b, s)) -> s -> ([a], [b])
+partitionUnfoldr f =
+  let go !as !bs !s =
+        case f s of
+          Just (Left a, s') -> go (a : as) bs s'
+          Just (Right b, s') -> go as (b : bs) s'
+          Nothing -> (as, bs)
+   in go [] []
+
+{- | Return the smaller of the two.
+
+>>> minMaybe (Just 1) (Just 3) == Just (Left 1)
+>>> minMaybe (Just 3) (Just 1) == Just (Right 1)
+>>> minMaybe (Just 1) Nothing  == Just (Left 1)
+>>> minMaybe Nothing Nothing   == Nothing
+-}
+minMaybe :: (Ord a) => Maybe a -> Maybe a -> Maybe (Either a a)
+minMaybe = \cases
+  (Just a) (Just b) -> Just $ if a < b then Left a else Right b
+  (Just a) Nothing -> Just (Left a)
+  Nothing (Just b) -> Just (Right b)
+  Nothing Nothing -> Nothing
+
+{- | Split on the given delimiter
+
+>>> splitOnce "::" "a" == Nothing
+>>> splitOnce "::" "a::b::c" == Just ("a", "b::c")
+-}
+splitOnce :: LazyByteString -> LazyByteString -> Maybe (LazyByteString, LazyByteString)
+splitOnce delim =
+  let delimChar = LBS.head delim
+      go s =
+        case LBS.elemIndex delimChar s of
+          -- Delimiter not found
+          Nothing -> Nothing
+          Just i
+            -- Found delimiter
+            | Just s' <- LBS.stripPrefix delim (LBS.drop i s) -> Just (LBS.take i s, s')
+            -- False positive, try again
+            | otherwise -> go (LBS.drop (i + 1) s)
+   in go
