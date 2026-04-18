@@ -16,7 +16,7 @@ import XReferee.SearchResult (
   findRefsFromGit,
  )
 import XReferee.TestUtils.API (defaultOpts)
-import XReferee.TestUtils.Fixtures (getGitFixtures)
+import XReferee.TestUtils.Fixtures (Loc (..), getGitFixtures)
 import XReferee.TestUtils.Fixtures qualified as Fixture
 import XReferee.TestUtils.Git (withGitRepo)
 
@@ -27,31 +27,26 @@ spec = do
       fixtures <- getGitFixtures
       forM_ fixtures $ \(fixturePath, loadFixture) -> do
         fixture <- loadFixture
-        let expectedAnchors =
-              Map.mapKeys Anchor
-                . Map.map ((: []) . fromFixtureLoc)
-                $ fixture.anchors
-            expectedRefs =
-              Map.mapKeys Reference
-                . Map.map (map fromFixtureLoc)
-                $ fixture.refs
+        let expectedAnchors = Map.mapKeys Anchor fixture.anchors
+            expectedRefs = Map.mapKeys Reference fixture.refs
 
         withGitRepo fixture.files $ do
           result <- findRefsFromGit defaultOpts
           context fixturePath $ do
             -- Manually iterate to show smaller errors
-            forM_ (Map.toList expectedAnchors) $ \(anchor, locs) ->
+            forM_ (Map.toList expectedAnchors) $ \(anchor, loc) ->
               context (show anchor) $
-                Set.fromList (Map.findWithDefault [] anchor result.anchors) `shouldBe` Set.fromList locs
+                Map.findWithDefault [] anchor result.anchors `shouldMatchLocs` [loc]
             forM_ (Map.toList expectedRefs) $ \(ref, locs) ->
               context (show ref) $
-                Set.fromList (Map.findWithDefault [] ref result.references) `shouldBe` Set.fromList locs
+                Map.findWithDefault [] ref result.references `shouldMatchLocs` locs
           let report = makeReport result
           context fixturePath . context (Text.unpack $ renderReport report) $
             reportFailure report `shouldBe` False
   where
-    fromFixtureLoc loc =
-      LabelLoc
-        { filepath = loc.file
-        , lineNum = loc.lineNum
-        }
+    shouldMatchLocs :: [LabelLoc] -> [Loc] -> IO ()
+    labelLocs `shouldMatchLocs` locs = Set.fromList (toLoc <$> labelLocs) `shouldBe` Set.fromList locs
+      where
+        -- Ignore `LabelLoc.columnRange` for the purpose of integration tests,
+        -- since column ranges are not part of the report.
+        toLoc (LabelLoc file lineNum _columnRange) = Loc{file, Fixture.lineNum}

@@ -5,11 +5,13 @@ module XReferee.TestUtils.API (
   anchor,
   ref,
   loc,
+  loc',
 ) where
 
 import Data.Text (Text)
 import XReferee.SearchResult (
   Anchor (..),
+  ColumnRange (..),
   LabelLoc (..),
   Reference (..),
   SearchOpts (..),
@@ -29,4 +31,15 @@ ref :: Text -> [LabelLoc] -> (Reference, [LabelLoc])
 ref name locs = (Reference name, locs)
 
 loc :: FilePath -> Int -> LabelLoc
-loc = LabelLoc
+loc filepath lineNum =
+  loc' filepath lineNum dummyColumnRange
+  where
+    dummyColumnRange = (0, 0)
+
+loc' :: FilePath -> Int -> (Int, Int) -> LabelLoc
+loc' filepath lineNum (startCol, endCol) =
+  LabelLoc
+    { filepath
+    , lineNum
+    , columnRange = ColumnRange{start = startCol, end = endCol}
+    }

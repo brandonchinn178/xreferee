@@ -23,6 +23,7 @@ data Loc = Loc
   { file :: FilePath
   , lineNum :: Int
   }
+  deriving (Eq, Ord)
 
 data Fixture = Fixture
   { anchors :: Map Text Loc
