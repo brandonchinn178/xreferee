@@ -113,26 +113,17 @@ findRefsFromGit opts = do
           , ["-z", "--full-name", "--line-number", "--column"]
           , ["-I"] -- ignore binary files
           , ["--untracked" | opts.includeUntracked] -- include untracked files
-          , ["--fixed-strings", "-e", Text.unpack anchorStart, "-e", Text.unpack refStart]
+          , ["--fixed-strings", "-e", anchorStart, "-e", refStart]
           , ["--"]
           , [":/"]
-          , [":!" <> Text.unpack i | i <- opts.ignores]
+          , [":!" <> i | i <- opts.ignores]
           ]
-      proc =
-        (Process.proc "git" args)
-          { Process.std_out = Process.CreatePipe
-          , Process.std_err = Process.CreatePipe
-          }
-  Process.withCreateProcess proc $ \_ stdoutHandle stderrHandle ph -> do
-    stdout <- maybe (pure "") LBS.hGetContents stdoutHandle
-    result <- evaluate $!! mconcat . map parseLine . LBS.Char8.lines $ stdout
-    code <- Process.waitForProcess ph
-    stderr <- maybe (pure "") LBS.hGetContents stderrHandle
-    LBS.hPutStr IO.stderr stderr
-    when (code /= ExitSuccess && (not . LBS.null) stderr) $
-      -- TODO: Proper error?
-      errorWithoutStackTrace "git grep failed"
-    pure result
+  result <- streamProcLines "git" args parseLine
+  LBS.hPutStr IO.stderr result.stderr
+  when (result.code /= ExitSuccess && (not . LBS.null) result.stderr) $
+    -- TODO: Proper error?
+    errorWithoutStackTrace "git grep failed"
+  pure . mconcat $ result.stdout
 
 parseLine :: LazyByteString -> SearchResult
 parseLine line = fromMaybe mempty $ do
@@ -245,6 +236,37 @@ instance HasField "splitOnce" ParseState (LazyByteString -> Maybe (LazyByteStrin
          in (res, state')
 
 {----- Utilities -----}
+
+data StreamProcResult a = StreamProcResult
+  { code :: ExitCode
+  , stdout :: a
+  , stderr :: LazyByteString
+  }
+
+streamProcLines ::
+  (NFData a) =>
+  FilePath ->
+  [Text] ->
+  (LazyByteString -> a) ->
+  IO (StreamProcResult [a])
+streamProcLines cmd args onStdoutLine = do
+  let proc =
+        (Process.proc cmd (map Text.unpack args))
+          { Process.std_out = Process.CreatePipe
+          , Process.std_err = Process.CreatePipe
+          }
+  Process.withCreateProcess proc $ \_ stdoutHandle stderrHandle ph -> do
+    rawStdout <- maybe (pure "") LBS.hGetContents stdoutHandle
+    stdout <- evaluate $!! map onStdoutLine . LBS.Char8.lines $ rawStdout
+    rawStderr <- maybe (pure "") LBS.hGetContents stderrHandle
+    stderr <- evaluate $!! rawStderr
+    code <- Process.waitForProcess ph
+    pure
+      StreamProcResult
+        { code
+        , stdout
+        , stderr
+        }
 
 partitionUnfoldr :: (s -> Maybe (Either a b, s)) -> s -> ([a], [b])
 partitionUnfoldr f =
