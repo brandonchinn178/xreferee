@@ -37,6 +37,11 @@ MY_VERSION = 123
 const MY_VERSION = 123
 ```
 
+## Pre-requisites
+
+* Requires `git` on PATH
+  * Requires Git 2.19+
+
 ## Installation
 
 Go to the GitHub releases page and download an artifact.
