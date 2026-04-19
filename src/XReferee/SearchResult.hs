@@ -133,24 +133,25 @@ findRefsFromGit opts = do
       -- TODO: Proper error?
       errorWithoutStackTrace "git grep failed"
     pure result
-  where
-    parseLine line = fromMaybe mempty $ do
-      -- Split on \NUL characters
-      [filepath, lineNumStr, colNumStr, rest] <- pure $ LBS.split 0 line
-      lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
-      colNum <- readMaybe $ LBS.Char8.unpack colNumStr
-      let (anchors, references) = parseLabels rest colNum
-          mkLoc columnRange =
-            LabelLoc
-              { filepath = LBS.Char8.unpack filepath
-              , lineNum
-              , columnRange
-              }
-      pure
-        SearchResult
-          { anchors = Map.fromListWith (<>) [(anchor, [mkLoc range]) | (anchor, range) <- anchors]
-          , references = Map.fromListWith (<>) [(ref, [mkLoc range]) | (ref, range) <- references]
+
+parseLine :: LazyByteString -> SearchResult
+parseLine line = fromMaybe mempty $ do
+  -- Split on \NUL characters
+  [filepath, lineNumStr, colNumStr, rest] <- pure $ LBS.split 0 line
+  lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
+  colNum <- readMaybe $ LBS.Char8.unpack colNumStr
+  let (anchors, references) = parseLabels rest colNum
+      mkLoc columnRange =
+        LabelLoc
+          { filepath = LBS.Char8.unpack filepath
+          , lineNum
+          , columnRange
           }
+  pure
+    SearchResult
+      { anchors = Map.fromListWith (<>) [(anchor, [mkLoc range]) | (anchor, range) <- anchors]
+      , references = Map.fromListWith (<>) [(ref, [mkLoc range]) | (ref, range) <- references]
+      }
 
 parseLabels ::
   LazyByteString ->
