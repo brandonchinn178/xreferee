@@ -15,6 +15,8 @@ module XReferee.SearchResult (
   ColNum,
   LabelLoc (..),
   findRefsFromGit,
+
+  -- * Internal API
   parseLabels,
 ) where
 
