@@ -1,5 +1,6 @@
 {-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
@@ -8,7 +9,11 @@ import Data.Text.IO qualified as Text
 import Options.Applicative qualified as Opt
 import System.Exit (exitFailure)
 import XReferee.Report (makeReport, renderReport, reportFailure)
-import XReferee.SearchResult (SearchOpts (..), findRefsFromGit)
+import XReferee.SearchResult (
+  SearchOpts (..),
+  defaultDelims,
+  findRefsFromGit,
+ )
 
 {----- CLI Options -----}
 
@@ -28,6 +33,12 @@ cliOptions =
       pure CLIOptions{..}
 
     parseSearchOpts = do
+      -- TODO: Customize delimiters
+      -- https://github.com/brandonchinn178/xreferee/issues/11
+      --
+      -- TODO: When anchorStart/refStart are customizable, make sure to validate
+      -- that they're non-empty
+      let delims = defaultDelims
       ignores <-
         Opt.many . Opt.strOption . mconcat $
           [ Opt.long "ignore"

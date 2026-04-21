@@ -1,3 +1,4 @@
+{-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NoFieldSelectors #-}
@@ -29,7 +30,8 @@ spec = do
       withGitRepo files $ do
         let expected =
               SearchResult
-                { anchors = Map.fromList [anchor "foo" [loc' "python/a/b/foo_anchor.py" 1 (11, 20)]]
+                { delims = defaultOpts.delims
+                , anchors = Map.fromList [anchor "foo" [loc' "python/a/b/foo_anchor.py" 1 (11, 20)]]
                 , references = Map.fromList [ref "foo" [loc' "javascript/c/d/foo_ref.js" 1 (15, 24)]]
                 }
         findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
@@ -44,7 +46,8 @@ spec = do
       withGitRepo files $ do
         let expected =
               SearchResult
-                { anchors =
+                { delims = defaultOpts.delims
+                , anchors =
                     Map.fromList
                       [ anchor "foo" [loc' "python/a/b/foo_anchor.py" 1 (11, 20), loc' "python/a/b/foo_anchor.py" 1 (22, 31)]
                       , anchor "foo2" [loc' "python/a/b/foo_anchor.py" 1 (33, 43)]
@@ -64,7 +67,12 @@ spec = do
     it "handles ignores" $ do
       withGitRepo [("ignored/test.txt", "@(ref:broken)")] $ do
         let opts = defaultOpts{ignores = ["ignored/"]}
-            expected = SearchResult{anchors = mempty, references = mempty}
+            expected =
+              SearchResult
+                { delims = opts.delims
+                , anchors = mempty
+                , references = mempty
+                }
         findRefsFromGit opts `shouldSatisfy` P.returns (P.eq expected)
 
     it "handles files with special characters" $ do
@@ -75,7 +83,8 @@ spec = do
       withGitRepo files $ do
         let expected =
               SearchResult
-                { anchors =
+                { delims = defaultOpts.delims
+                , anchors =
                     Map.fromList
                       [ anchor "test1" [loc' "foo:49:.txt" 1 (1, 12)]
                       , anchor "test2" [loc' "foo\\.txt" 1 (1, 12)]
@@ -92,7 +101,8 @@ spec = do
       withGitRepo files $ do
         let expected =
               SearchResult
-                { anchors = Map.fromList [anchor "foo" [loc' "python/a/b/foo_anchor.py" 1 (11, 20)]]
+                { delims = defaultOpts.delims
+                , anchors = Map.fromList [anchor "foo" [loc' "python/a/b/foo_anchor.py" 1 (11, 20)]]
                 , references = Map.fromList [ref "foo" [loc' "javascript/c/d/foo_ref.js" 1 (15, 24)]]
                 }
         withCurrentDirectory "python/a/b/" $

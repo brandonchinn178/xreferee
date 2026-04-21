@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -6,7 +7,13 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
 module XReferee.SearchResult (
+  -- * Options
   SearchOpts (..),
+  MarkerDelims (..),
+  defaultDelims,
+
+  -- * Search results
+  findRefsFromGit,
   SearchResult (..),
   Anchor (..),
   Reference (..),
@@ -14,7 +21,6 @@ module XReferee.SearchResult (
   ColumnRange (..),
   ColNum,
   LabelLoc (..),
-  findRefsFromGit,
 
   -- * Internal API
   parseLabels,
@@ -28,9 +34,11 @@ import Data.ByteString.Lazy (LazyByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.ByteString.Lazy.Char8 qualified as LBS.Char8
 import Data.Int (Int64)
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (mapMaybe)
+import Data.Semigroup (sconcat)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text
@@ -41,17 +49,31 @@ import System.Process qualified as Process
 import Text.Read (readMaybe)
 
 data SearchOpts = SearchOpts
-  { ignores :: [Text]
+  { delims :: MarkerDelims
+  , ignores :: [Text]
   , includeUntracked :: Bool
   }
 
--- Customize? https://github.com/brandonchinn178/xreferee/issues/11
-anchorStart, anchorEnd, refStart, refEnd :: Text
-(anchorStart, anchorEnd) = ("#(ref:", ")")
-(refStart, refEnd) = ("@(ref:", ")")
+data MarkerDelims = MarkerDelims
+  { anchorStart :: Text
+  , anchorEnd :: Text
+  , refStart :: Text
+  , refEnd :: Text
+  }
+  deriving (Show, Eq)
+
+defaultDelims :: MarkerDelims
+defaultDelims =
+  MarkerDelims
+    { anchorStart = "#(ref:"
+    , anchorEnd = ")"
+    , refStart = "@(ref:"
+    , refEnd = ")"
+    }
 
 data SearchResult = SearchResult
-  { anchors :: Map Anchor [LabelLoc]
+  { delims :: MarkerDelims
+  , anchors :: Map Anchor [LabelLoc]
   , references :: Map Reference [LabelLoc]
   }
   deriving (Show, Eq)
@@ -61,11 +83,10 @@ instance NFData SearchResult where
 instance Semigroup SearchResult where
   result1 <> result2 =
     SearchResult
-      { anchors = Map.unionWith (<>) result1.anchors result2.anchors
+      { delims = result1.delims
+      , anchors = Map.unionWith (<>) result1.anchors result2.anchors
       , references = Map.unionWith (<>) result1.references result2.references
       }
-instance Monoid SearchResult where
-  mempty = SearchResult mempty mempty
 
 newtype Anchor = Anchor Text
   deriving (Show, Eq, Ord, NFData)
@@ -74,17 +95,14 @@ newtype Reference = Reference Text
   deriving (Show, Eq, Ord, NFData)
 
 class Label a where
-  fromLabel :: Text -> a
-  toLabel :: a -> Text
-  renderLabel :: a -> Text
+  getLabel :: a -> Text
+  renderLabel :: MarkerDelims -> a -> Text
 instance Label Anchor where
-  fromLabel = Anchor
-  toLabel (Anchor s) = s
-  renderLabel (Anchor s) = anchorStart <> s <> anchorEnd
+  getLabel (Anchor s) = s
+  renderLabel delims (Anchor s) = delims.anchorStart <> s <> delims.anchorEnd
 instance Label Reference where
-  fromLabel = Reference
-  toLabel (Reference s) = s
-  renderLabel (Reference s) = refStart <> s <> refEnd
+  getLabel (Reference s) = s
+  renderLabel delims (Reference s) = delims.refStart <> s <> delims.refEnd
 
 data LabelLoc = LabelLoc
   { filepath :: FilePath
@@ -115,25 +133,33 @@ findRefsFromGit opts = do
           , ["-z", "--full-name", "--line-number", "--column"]
           , ["-I"] -- ignore binary files
           , ["--untracked" | opts.includeUntracked] -- include untracked files
-          , ["--fixed-strings", "-e", anchorStart, "-e", refStart]
+          , ["--fixed-strings", "-e", opts.delims.anchorStart, "-e", opts.delims.refStart]
           , ["--"]
           , [":/"]
           , [":!" <> i | i <- opts.ignores]
           ]
-  result <- streamProcLines "git" args parseLine
+  result <- streamProcLines "git" args (parseLine opts.delims)
   LBS.hPutStr IO.stderr result.stderr
   when (result.code /= ExitSuccess && (not . LBS.null) result.stderr) $
     -- TODO: Proper error?
     errorWithoutStackTrace "git grep failed"
-  pure . mconcat $ result.stdout
+  pure $
+    case NonEmpty.nonEmpty result.stdout of
+      Nothing ->
+        SearchResult
+          { delims = opts.delims
+          , anchors = Map.empty
+          , references = Map.empty
+          }
+      Just results -> sconcat results
 
-parseLine :: LazyByteString -> SearchResult
-parseLine line = fromMaybe mempty $ do
+parseLine :: MarkerDelims -> LazyByteString -> Maybe SearchResult
+parseLine delims line = do
   -- Split on \NUL characters
   [filepath, lineNumStr, colNumStr, rest] <- pure $ LBS.split 0 line
   lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
   colNum <- readMaybe $ LBS.Char8.unpack colNumStr
-  let (anchors, references) = parseLabels rest colNum
+  let (anchors, references) = parseLabels delims rest colNum
       mkLoc columnRange =
         LabelLoc
           { filepath = LBS.Char8.unpack filepath
@@ -142,15 +168,17 @@ parseLine line = fromMaybe mempty $ do
           }
   pure
     SearchResult
-      { anchors = Map.fromListWith (<>) [(anchor, [mkLoc range]) | (anchor, range) <- anchors]
+      { delims
+      , anchors = Map.fromListWith (<>) [(anchor, [mkLoc range]) | (anchor, range) <- anchors]
       , references = Map.fromListWith (<>) [(ref, [mkLoc range]) | (ref, range) <- references]
       }
 
 parseLabels ::
+  MarkerDelims ->
   LazyByteString ->
   ColNum ->
   ([(Anchor, ColumnRange)], [(Reference, ColumnRange)])
-parseLabels s0 col0 =
+parseLabels delims s0 col0 =
   partitionUnfoldr parseSomeMarker $
     ParseState
       { str = LBS.drop (fromIntegral col0 - 1) s0
@@ -160,10 +188,10 @@ parseLabels s0 col0 =
     toLBS = LBS.fromStrict . Text.encodeUtf8
     toText = Text.decodeUtf8 . LBS.toStrict
 
-    anchorStartBS = toLBS anchorStart
-    anchorEndBS = toLBS anchorEnd
-    refStartBS = toLBS refStart
-    refEndBS = toLBS refEnd
+    anchorStartBS = toLBS delims.anchorStart
+    anchorEndBS = toLBS delims.anchorEnd
+    refStartBS = toLBS delims.refStart
+    refEndBS = toLBS delims.refEnd
 
     -- TODO: When anchorStart/refStart are customizable, make sure to validate
     -- that they're non-empty
@@ -249,7 +277,7 @@ streamProcLines ::
   (NFData a) =>
   FilePath ->
   [Text] ->
-  (LazyByteString -> a) ->
+  (LazyByteString -> Maybe a) ->
   IO (StreamProcResult [a])
 streamProcLines cmd args onStdoutLine = do
   let proc =
@@ -259,7 +287,7 @@ streamProcLines cmd args onStdoutLine = do
           }
   Process.withCreateProcess proc $ \_ stdoutHandle stderrHandle ph -> do
     rawStdout <- maybe (pure "") LBS.hGetContents stdoutHandle
-    stdout <- evaluate $!! map onStdoutLine . LBS.Char8.lines $ rawStdout
+    stdout <- evaluate $!! mapMaybe onStdoutLine . LBS.Char8.lines $ rawStdout
     rawStderr <- maybe (pure "") LBS.hGetContents stderrHandle
     stderr <- evaluate $!! rawStderr
     code <- Process.waitForProcess ph

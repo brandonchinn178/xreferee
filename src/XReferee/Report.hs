@@ -16,8 +16,8 @@ import XReferee.SearchResult (
   Label,
   LabelLoc (..),
   SearchResult (..),
+  getLabel,
   renderLabel,
-  toLabel,
  )
 
 newtype Report = Report {unReport :: [ReportSection]}
@@ -75,7 +75,7 @@ reportSectionBrokenRef = (info, mkViolations)
         , fatal = True
         }
     mkViolations result =
-      renderLabelMap $ excludeKeysFrom result.anchors result.references
+      renderLabelMap result $ excludeKeysFrom result.anchors result.references
 
 reportSectionUnusedAnchors :: ReportSectionTemplate
 reportSectionUnusedAnchors = (info, mkViolations)
@@ -86,7 +86,7 @@ reportSectionUnusedAnchors = (info, mkViolations)
         , fatal = False
         }
     mkViolations result =
-      renderLabelMap $ excludeKeysFrom result.references result.anchors
+      renderLabelMap result $ excludeKeysFrom result.references result.anchors
 
 reportSectionDuplicateAnchors :: ReportSectionTemplate
 reportSectionDuplicateAnchors = (info, mkViolations)
@@ -97,13 +97,13 @@ reportSectionDuplicateAnchors = (info, mkViolations)
         , fatal = True
         }
     mkViolations result =
-      renderLabelMap $ Map.filter ((> 1) . length) result.anchors
+      renderLabelMap result $ Map.filter ((> 1) . length) result.anchors
 
 excludeKeysFrom :: (Label a, Label b) => Map a v -> Map b v -> Map b v
-excludeKeysFrom excludes = filterKeys ((`Map.notMember` Map.mapKeys toLabel excludes) . toLabel)
+excludeKeysFrom excludes = filterKeys ((`Map.notMember` Map.mapKeys getLabel excludes) . getLabel)
 
-renderLabelMap :: (Label a) => Map a v -> Map Text v
-renderLabelMap = Map.mapKeys renderLabel
+renderLabelMap :: (Label a) => SearchResult -> Map a v -> Map Text v
+renderLabelMap result = Map.mapKeys (renderLabel result.delims)
 
 -- Added in containers 0.8
 filterKeys :: (k -> Bool) -> Map k a -> Map k a
