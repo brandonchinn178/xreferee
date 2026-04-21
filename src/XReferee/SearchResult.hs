@@ -19,6 +19,7 @@ module XReferee.SearchResult (
   Reference (..),
   Label (..),
   ColumnRange (..),
+  LineNum,
   ColNum,
   LabelLoc (..),
 
@@ -37,7 +38,6 @@ import Data.Int (Int64)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (mapMaybe)
 import Data.Semigroup (sconcat)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -88,6 +88,14 @@ instance Semigroup SearchResult where
       , references = Map.unionWith (<>) result1.references result2.references
       }
 
+emptySearchResult :: MarkerDelims -> SearchResult
+emptySearchResult delims =
+  SearchResult
+    { delims
+    , anchors = mempty
+    , references = mempty
+    }
+
 newtype Anchor = Anchor Text
   deriving (Show, Eq, Ord, NFData)
 
@@ -106,11 +114,12 @@ instance Label Reference where
 
 data LabelLoc = LabelLoc
   { filepath :: FilePath
-  , lineNum :: Int
+  , lineNum :: LineNum
   , columnRange :: ColumnRange
   }
   deriving (Show, Eq, Ord)
 
+type LineNum = Int
 type ColNum = Int
 
 data ColumnRange = ColumnRange
@@ -127,63 +136,75 @@ instance NFData LabelLoc where
 
 findRefsFromGit :: SearchOpts -> IO SearchResult
 findRefsFromGit opts = do
-  let args =
-        concat
-          [ ["grep"]
-          , ["-z", "--full-name", "--line-number", "--column"]
-          , ["-I"] -- ignore binary files
-          , ["--untracked" | opts.includeUntracked] -- include untracked files
-          , ["--fixed-strings", "-e", opts.delims.anchorStart, "-e", opts.delims.refStart]
-          , ["--"]
-          , [":/"]
-          , [":!" <> i | i <- opts.ignores]
-          ]
-  result <- streamProcLines "git" args (parseLine opts.delims)
+  result <-
+    streamProcLines "git" args $ \line -> do
+      case extractGrepParts line of
+        Nothing -> do
+          LBS.Char8.hPutStrLn IO.stderr $ "[WARN] Found line in unexpected format: " <> line
+          pure $ emptySearchResult delims
+        Just (filepath, lineNum, match) -> do
+          pure $ toSearchResult delims filepath lineNum match
   LBS.hPutStr IO.stderr result.stderr
   when (result.code /= ExitSuccess && (not . LBS.null) result.stderr) $
-    -- TODO: Proper error?
+    -- TODO: Proper error - https://github.com/brandonchinn178/xreferee/issues/4
     errorWithoutStackTrace "git grep failed"
   pure $
     case NonEmpty.nonEmpty result.stdout of
-      Nothing ->
-        SearchResult
-          { delims = opts.delims
-          , anchors = Map.empty
-          , references = Map.empty
-          }
+      Nothing -> emptySearchResult delims
       Just results -> sconcat results
+  where
+    delims = opts.delims
+    args =
+      concat
+        [ ["grep"]
+        , ["-z", "--full-name", "--line-number"]
+        , ["-I"] -- ignore binary files
+        , ["--untracked" | opts.includeUntracked]
+        , ["--fixed-strings"]
+        , ["-e", delims.anchorStart]
+        , ["-e", delims.refStart]
+        , ["--"]
+        , [":/"]
+        , [":!" <> i | i <- opts.ignores]
+        ]
 
-parseLine :: MarkerDelims -> LazyByteString -> Maybe SearchResult
-parseLine delims line = do
-  -- Split on \NUL characters
-  [filepath, lineNumStr, colNumStr, rest] <- pure $ LBS.split 0 line
-  lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
-  colNum <- readMaybe $ LBS.Char8.unpack colNumStr
-  let (anchors, references) = parseLabels delims rest colNum
-      mkLoc columnRange =
-        LabelLoc
-          { filepath = LBS.Char8.unpack filepath
-          , lineNum
-          , columnRange
-          }
-  pure
-    SearchResult
-      { delims
-      , anchors = Map.fromListWith (<>) [(anchor, [mkLoc range]) | (anchor, range) <- anchors]
-      , references = Map.fromListWith (<>) [(ref, [mkLoc range]) | (ref, range) <- references]
-      }
+    extractGrepParts line = do
+      [filepathStr, lineNumStr, match] <- pure $ LBS.split 0 line
+      let filepath = LBS.Char8.unpack filepathStr
+      lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
+      Just (filepath, lineNum, match)
+
+toSearchResult ::
+  MarkerDelims ->
+  FilePath ->
+  LineNum ->
+  LazyByteString ->
+  SearchResult
+toSearchResult delims filepath lineNum line =
+  SearchResult
+    { delims
+    , anchors = toLabelMap anchors
+    , references = toLabelMap references
+    }
+  where
+    (anchors, references) = parseLabels delims line
+    toLabelMap markers =
+      Map.fromListWith (<>) $
+        [ (marker, [loc])
+        | (marker, range) <- markers
+        , let loc =
+                LabelLoc
+                  { filepath
+                  , lineNum
+                  , columnRange = range
+                  }
+        ]
 
 parseLabels ::
   MarkerDelims ->
   LazyByteString ->
-  ColNum ->
   ([(Anchor, ColumnRange)], [(Reference, ColumnRange)])
-parseLabels delims s0 col0 =
-  partitionUnfoldr parseSomeMarker $
-    ParseState
-      { str = LBS.drop (fromIntegral col0 - 1) s0
-      , col = col0
-      }
+parseLabels delims s0 = partitionUnfoldr parseSomeMarker ParseState{str = s0, col = 1}
   where
     toLBS = LBS.fromStrict . Text.encodeUtf8
     toText = Text.decodeUtf8 . LBS.toStrict
@@ -193,8 +214,6 @@ parseLabels delims s0 col0 =
     refStartBS = toLBS delims.refStart
     refEndBS = toLBS delims.refEnd
 
-    -- TODO: When anchorStart/refStart are customizable, make sure to validate
-    -- that they're non-empty
     anchorStartChar = LBS.head anchorStartBS
     refStartChar = LBS.head refStartBS
 
@@ -277,7 +296,7 @@ streamProcLines ::
   (NFData a) =>
   FilePath ->
   [Text] ->
-  (LazyByteString -> Maybe a) ->
+  (LazyByteString -> IO a) ->
   IO (StreamProcResult [a])
 streamProcLines cmd args onStdoutLine = do
   let proc =
@@ -287,7 +306,7 @@ streamProcLines cmd args onStdoutLine = do
           }
   Process.withCreateProcess proc $ \_ stdoutHandle stderrHandle ph -> do
     rawStdout <- maybe (pure "") LBS.hGetContents stdoutHandle
-    stdout <- evaluate $!! mapMaybe onStdoutLine . LBS.Char8.lines $ rawStdout
+    stdout <- (evaluate $!!) =<< mapM onStdoutLine (LBS.Char8.lines rawStdout)
     rawStderr <- maybe (pure "") LBS.hGetContents stderrHandle
     stderr <- evaluate $!! rawStderr
     code <- Process.waitForProcess ph
