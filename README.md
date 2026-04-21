@@ -40,7 +40,8 @@ const MY_VERSION = 123
 ## Pre-requisites
 
 * Requires `git` on PATH
-  * Requires Git 2.19+
+  * Plain usage requires Git 1.5+
+  * `xreferee --untracked` requires Git 1.7.7+
 
 ## Installation
 

@@ -33,11 +33,11 @@ import Data.Bitraversable (bitraverse)
 import Data.ByteString.Lazy (LazyByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.ByteString.Lazy.Char8 qualified as LBS.Char8
+import Data.Char (isAlphaNum)
 import Data.Int (Int64)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (mapMaybe)
 import Data.Semigroup (sconcat)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -88,6 +88,14 @@ instance Semigroup SearchResult where
       , references = Map.unionWith (<>) result1.references result2.references
       }
 
+emptySearchResult :: MarkerDelims -> SearchResult
+emptySearchResult delims =
+  SearchResult
+    { delims
+    , anchors = mempty
+    , references = mempty
+    }
+
 newtype Anchor = Anchor Text
   deriving (Show, Eq, Ord, NFData)
 
@@ -125,53 +133,91 @@ instance NFData ColumnRange where
 instance NFData LabelLoc where
   rnf loc = rnf loc.filepath `seq` rnf loc.lineNum `seq` rnf loc.columnRange
 
+-- FIXME(bchinn): in SearchOpts, add algorithm = Maybe (Optimized | Compat), test all options in integration test
 findRefsFromGit :: SearchOpts -> IO SearchResult
 findRefsFromGit opts = do
-  let args =
-        concat
-          [ ["grep"]
-          , ["-z", "--full-name", "--line-number", "--column"]
-          , ["-I"] -- ignore binary files
-          , ["--untracked" | opts.includeUntracked] -- include untracked files
-          , ["--fixed-strings", "-e", opts.delims.anchorStart, "-e", opts.delims.refStart]
-          , ["--"]
-          , [":/"]
-          , [":!" <> i | i <- opts.ignores]
-          ]
-  result <- streamProcLines "git" args (parseLine opts.delims)
+  result <- findRefsFromGit_optimized <||> findRefsFromGit_compat
   LBS.hPutStr IO.stderr result.stderr
   when (result.code /= ExitSuccess && (not . LBS.null) result.stderr) $
-    -- TODO: Proper error?
+    -- TODO: Proper error - https://github.com/brandonchinn178/xreferee/issues/4
     errorWithoutStackTrace "git grep failed"
   pure $
     case NonEmpty.nonEmpty result.stdout of
-      Nothing ->
-        SearchResult
-          { delims = opts.delims
-          , anchors = Map.empty
-          , references = Map.empty
-          }
+      Nothing -> emptySearchResult delims
       Just results -> sconcat results
+  where
+    delims = opts.delims
 
-parseLine :: MarkerDelims -> LazyByteString -> Maybe SearchResult
-parseLine delims line = do
-  -- Split on \NUL characters
-  [filepath, lineNumStr, colNumStr, rest] <- pure $ LBS.split 0 line
-  lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
-  colNum <- readMaybe $ LBS.Char8.unpack colNumStr
-  let (anchors, references) = parseLabels delims rest colNum
-      mkLoc columnRange =
-        LabelLoc
-          { filepath = LBS.Char8.unpack filepath
-          , lineNum
-          , columnRange
+    m1 <||> m2 = do
+      result <- m1
+      case result.code of
+        ExitSuccess -> pure result
+        _ -> m2
+
+    -- #(ref:asdf)
+    streamGit flags =
+      streamProcLines "git" . concat $
+        [ ["grep"]
+        , ["-z", "--full-name", "--line-number"]
+        , ["-I"] -- ignore binary files
+        , ["--untracked" | opts.includeUntracked] -- include untracked files
+        , flags
+        , ["--"]
+        , [":/"]
+        , [":!" <> i | i <- opts.ignores]
+        ]
+
+    findRefsFromGit_optimized = do
+      let flags =
+            [ ["--only-matching", "--column"] -- requires Git 2.19+
+            , ["--perl-regexp"] -- requires Git to be compiled with libpcre
+            , ["-e", toRegex (delims.anchorStart, delims.anchorEnd)]
+            , ["-e", toRegex (delims.refStart, delims.refEnd)]
+            ]
+          toRegex (start, end) = escRegex start <> ".*?" <> escRegex end
+      streamGit (concat flags) . parseLineWith delims $ \line -> do
+        [filepath, lineNum, colNum, rest] <- pure $ LBS.split 0 line
+        Just (filepath, lineNum, colNum, rest)
+
+    findRefsFromGit_compat = do
+      let flags =
+            [ ["--fixed-strings"]
+            , ["-e", delims.anchorStart]
+            , ["-e", delims.refStart]
+            ]
+      streamGit (concat flags) . parseLineWith delims $ \line -> do
+        [filepath, lineNum, rest] <- pure $ LBS.split 0 line
+        Just (filepath, lineNum, "1", rest)
+
+parseLineWith ::
+  MarkerDelims ->
+  (LazyByteString -> Maybe (LazyByteString, LazyByteString, LazyByteString, LazyByteString)) ->
+  LazyByteString ->
+  IO SearchResult
+parseLineWith delims toParts line = do
+  case toParts line >>= resolve of
+    Nothing -> do
+      LBS.Char8.hPutStrLn IO.stderr $ "[WARN] Found line in unexpected format: " <> line
+      pure $ emptySearchResult delims
+    Just (filepath, lineNum, colNum, rest) -> do
+      let (anchors, references) = parseLabels delims rest colNum
+          mkLoc columnRange =
+            LabelLoc
+              { filepath = LBS.Char8.unpack filepath
+              , lineNum
+              , columnRange
+              }
+      pure
+        SearchResult
+          { delims
+          , anchors = Map.fromListWith (<>) [(anchor, [mkLoc range]) | (anchor, range) <- anchors]
+          , references = Map.fromListWith (<>) [(ref, [mkLoc range]) | (ref, range) <- references]
           }
-  pure
-    SearchResult
-      { delims
-      , anchors = Map.fromListWith (<>) [(anchor, [mkLoc range]) | (anchor, range) <- anchors]
-      , references = Map.fromListWith (<>) [(ref, [mkLoc range]) | (ref, range) <- references]
-      }
+  where
+    resolve (filepath, lineNumStr, colNumStr, rest) = do
+      lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
+      colNum <- readMaybe $ LBS.Char8.unpack colNumStr
+      Just (filepath, lineNum, colNum, rest)
 
 parseLabels ::
   MarkerDelims ->
@@ -179,11 +225,7 @@ parseLabels ::
   ColNum ->
   ([(Anchor, ColumnRange)], [(Reference, ColumnRange)])
 parseLabels delims s0 col0 =
-  partitionUnfoldr parseSomeMarker $
-    ParseState
-      { str = LBS.drop (fromIntegral col0 - 1) s0
-      , col = col0
-      }
+  partitionUnfoldr parseSomeMarker ParseState{str = s0, col = col0}
   where
     toLBS = LBS.fromStrict . Text.encodeUtf8
     toText = Text.decodeUtf8 . LBS.toStrict
@@ -193,8 +235,6 @@ parseLabels delims s0 col0 =
     refStartBS = toLBS delims.refStart
     refEndBS = toLBS delims.refEnd
 
-    -- TODO: When anchorStart/refStart are customizable, make sure to validate
-    -- that they're non-empty
     anchorStartChar = LBS.head anchorStartBS
     refStartChar = LBS.head refStartBS
 
@@ -277,7 +317,7 @@ streamProcLines ::
   (NFData a) =>
   FilePath ->
   [Text] ->
-  (LazyByteString -> Maybe a) ->
+  (LazyByteString -> IO a) ->
   IO (StreamProcResult [a])
 streamProcLines cmd args onStdoutLine = do
   let proc =
@@ -287,7 +327,7 @@ streamProcLines cmd args onStdoutLine = do
           }
   Process.withCreateProcess proc $ \_ stdoutHandle stderrHandle ph -> do
     rawStdout <- maybe (pure "") LBS.hGetContents stdoutHandle
-    stdout <- evaluate $!! mapMaybe onStdoutLine . LBS.Char8.lines $ rawStdout
+    stdout <- (evaluate $!!) =<< mapM onStdoutLine (LBS.Char8.lines rawStdout)
     rawStderr <- maybe (pure "") LBS.hGetContents stderrHandle
     stderr <- evaluate $!! rawStderr
     code <- Process.waitForProcess ph
@@ -320,6 +360,16 @@ minMaybe = \cases
   (Just a) Nothing -> Just (Left a)
   Nothing (Just b) -> Just (Right b)
   Nothing Nothing -> Nothing
+
+{- | Escape a string for use in a Perl regex.
+
+https://perldoc.perl.org/perlfunc#quotemeta
+-}
+escRegex :: Text -> Text
+escRegex = Text.concatMap $ \c ->
+  if isAlphaNum c || c == '_'
+    then Text.singleton c
+    else "\\" <> Text.singleton c
 
 {- | Split on the given delimiter
 
