@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -6,7 +7,13 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
 module XReferee.SearchResult (
+  -- * Options
   SearchOpts (..),
+  MarkerDelims (..),
+  defaultDelims,
+
+  -- * Search results
+  findRefsFromGit,
   SearchResult (..),
   Anchor (..),
   Reference (..),
@@ -14,7 +21,8 @@ module XReferee.SearchResult (
   ColumnRange (..),
   ColNum,
   LabelLoc (..),
-  findRefsFromGit,
+
+  -- * Internal API
   parseLabels,
 ) where
 
@@ -26,9 +34,11 @@ import Data.ByteString.Lazy (LazyByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.ByteString.Lazy.Char8 qualified as LBS.Char8
 import Data.Int (Int64)
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (mapMaybe)
+import Data.Semigroup (sconcat)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text
@@ -39,17 +49,31 @@ import System.Process qualified as Process
 import Text.Read (readMaybe)
 
 data SearchOpts = SearchOpts
-  { ignores :: [Text]
+  { delims :: MarkerDelims
+  , ignores :: [Text]
   , includeUntracked :: Bool
   }
 
--- Customize? https://github.com/brandonchinn178/xreferee/issues/11
-anchorStart, anchorEnd, refStart, refEnd :: Text
-(anchorStart, anchorEnd) = ("#(ref:", ")")
-(refStart, refEnd) = ("@(ref:", ")")
+data MarkerDelims = MarkerDelims
+  { anchorStart :: Text
+  , anchorEnd :: Text
+  , refStart :: Text
+  , refEnd :: Text
+  }
+  deriving (Show, Eq)
+
+defaultDelims :: MarkerDelims
+defaultDelims =
+  MarkerDelims
+    { anchorStart = "#(ref:"
+    , anchorEnd = ")"
+    , refStart = "@(ref:"
+    , refEnd = ")"
+    }
 
 data SearchResult = SearchResult
-  { anchors :: Map Anchor [LabelLoc]
+  { delims :: MarkerDelims
+  , anchors :: Map Anchor [LabelLoc]
   , references :: Map Reference [LabelLoc]
   }
   deriving (Show, Eq)
@@ -59,11 +83,10 @@ instance NFData SearchResult where
 instance Semigroup SearchResult where
   result1 <> result2 =
     SearchResult
-      { anchors = Map.unionWith (<>) result1.anchors result2.anchors
+      { delims = result1.delims
+      , anchors = Map.unionWith (<>) result1.anchors result2.anchors
       , references = Map.unionWith (<>) result1.references result2.references
       }
-instance Monoid SearchResult where
-  mempty = SearchResult mempty mempty
 
 newtype Anchor = Anchor Text
   deriving (Show, Eq, Ord, NFData)
@@ -72,17 +95,14 @@ newtype Reference = Reference Text
   deriving (Show, Eq, Ord, NFData)
 
 class Label a where
-  fromLabel :: Text -> a
-  toLabel :: a -> Text
-  renderLabel :: a -> Text
+  getLabel :: a -> Text
+  renderLabel :: MarkerDelims -> a -> Text
 instance Label Anchor where
-  fromLabel = Anchor
-  toLabel (Anchor s) = s
-  renderLabel (Anchor s) = anchorStart <> s <> anchorEnd
+  getLabel (Anchor s) = s
+  renderLabel delims (Anchor s) = delims.anchorStart <> s <> delims.anchorEnd
 instance Label Reference where
-  fromLabel = Reference
-  toLabel (Reference s) = s
-  renderLabel (Reference s) = refStart <> s <> refEnd
+  getLabel (Reference s) = s
+  renderLabel delims (Reference s) = delims.refStart <> s <> delims.refEnd
 
 data LabelLoc = LabelLoc
   { filepath :: FilePath
@@ -113,50 +133,52 @@ findRefsFromGit opts = do
           , ["-z", "--full-name", "--line-number", "--column"]
           , ["-I"] -- ignore binary files
           , ["--untracked" | opts.includeUntracked] -- include untracked files
-          , ["--fixed-strings", "-e", Text.unpack anchorStart, "-e", Text.unpack refStart]
+          , ["--fixed-strings", "-e", opts.delims.anchorStart, "-e", opts.delims.refStart]
           , ["--"]
           , [":/"]
-          , [":!" <> Text.unpack i | i <- opts.ignores]
+          , [":!" <> i | i <- opts.ignores]
           ]
-      proc =
-        (Process.proc "git" args)
-          { Process.std_out = Process.CreatePipe
-          , Process.std_err = Process.CreatePipe
-          }
-  Process.withCreateProcess proc $ \_ stdoutHandle stderrHandle ph -> do
-    stdout <- maybe (pure "") LBS.hGetContents stdoutHandle
-    result <- evaluate $!! mconcat . map parseLine . LBS.Char8.lines $ stdout
-    code <- Process.waitForProcess ph
-    stderr <- maybe (pure "") LBS.hGetContents stderrHandle
-    LBS.hPutStr IO.stderr stderr
-    when (code /= ExitSuccess && (not . LBS.null) stderr) $
-      -- TODO: Proper error?
-      errorWithoutStackTrace "git grep failed"
-    pure result
-  where
-    parseLine line = fromMaybe mempty $ do
-      -- Split on \NUL characters
-      [filepath, lineNumStr, colNumStr, rest] <- pure $ LBS.split 0 line
-      lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
-      colNum <- readMaybe $ LBS.Char8.unpack colNumStr
-      let (anchors, references) = parseLabels rest colNum
-          mkLoc columnRange =
-            LabelLoc
-              { filepath = LBS.Char8.unpack filepath
-              , lineNum
-              , columnRange
-              }
-      pure
+  result <- streamProcLines "git" args (parseLine opts.delims)
+  LBS.hPutStr IO.stderr result.stderr
+  when (result.code /= ExitSuccess && (not . LBS.null) result.stderr) $
+    -- TODO: Proper error?
+    errorWithoutStackTrace "git grep failed"
+  pure $
+    case NonEmpty.nonEmpty result.stdout of
+      Nothing ->
         SearchResult
-          { anchors = Map.fromListWith (<>) [(anchor, [mkLoc range]) | (anchor, range) <- anchors]
-          , references = Map.fromListWith (<>) [(ref, [mkLoc range]) | (ref, range) <- references]
+          { delims = opts.delims
+          , anchors = Map.empty
+          , references = Map.empty
           }
+      Just results -> sconcat results
+
+parseLine :: MarkerDelims -> LazyByteString -> Maybe SearchResult
+parseLine delims line = do
+  -- Split on \NUL characters
+  [filepath, lineNumStr, colNumStr, rest] <- pure $ LBS.split 0 line
+  lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
+  colNum <- readMaybe $ LBS.Char8.unpack colNumStr
+  let (anchors, references) = parseLabels delims rest colNum
+      mkLoc columnRange =
+        LabelLoc
+          { filepath = LBS.Char8.unpack filepath
+          , lineNum
+          , columnRange
+          }
+  pure
+    SearchResult
+      { delims
+      , anchors = Map.fromListWith (<>) [(anchor, [mkLoc range]) | (anchor, range) <- anchors]
+      , references = Map.fromListWith (<>) [(ref, [mkLoc range]) | (ref, range) <- references]
+      }
 
 parseLabels ::
+  MarkerDelims ->
   LazyByteString ->
   ColNum ->
   ([(Anchor, ColumnRange)], [(Reference, ColumnRange)])
-parseLabels s0 col0 =
+parseLabels delims s0 col0 =
   partitionUnfoldr parseSomeMarker $
     ParseState
       { str = LBS.drop (fromIntegral col0 - 1) s0
@@ -166,10 +188,10 @@ parseLabels s0 col0 =
     toLBS = LBS.fromStrict . Text.encodeUtf8
     toText = Text.decodeUtf8 . LBS.toStrict
 
-    anchorStartBS = toLBS anchorStart
-    anchorEndBS = toLBS anchorEnd
-    refStartBS = toLBS refStart
-    refEndBS = toLBS refEnd
+    anchorStartBS = toLBS delims.anchorStart
+    anchorEndBS = toLBS delims.anchorEnd
+    refStartBS = toLBS delims.refStart
+    refEndBS = toLBS delims.refEnd
 
     -- TODO: When anchorStart/refStart are customizable, make sure to validate
     -- that they're non-empty
@@ -244,6 +266,37 @@ instance HasField "splitOnce" ParseState (LazyByteString -> Maybe (LazyByteStrin
          in (res, state')
 
 {----- Utilities -----}
+
+data StreamProcResult a = StreamProcResult
+  { code :: ExitCode
+  , stdout :: a
+  , stderr :: LazyByteString
+  }
+
+streamProcLines ::
+  (NFData a) =>
+  FilePath ->
+  [Text] ->
+  (LazyByteString -> Maybe a) ->
+  IO (StreamProcResult [a])
+streamProcLines cmd args onStdoutLine = do
+  let proc =
+        (Process.proc cmd (map Text.unpack args))
+          { Process.std_out = Process.CreatePipe
+          , Process.std_err = Process.CreatePipe
+          }
+  Process.withCreateProcess proc $ \_ stdoutHandle stderrHandle ph -> do
+    rawStdout <- maybe (pure "") LBS.hGetContents stdoutHandle
+    stdout <- evaluate $!! mapMaybe onStdoutLine . LBS.Char8.lines $ rawStdout
+    rawStderr <- maybe (pure "") LBS.hGetContents stderrHandle
+    stderr <- evaluate $!! rawStderr
+    code <- Process.waitForProcess ph
+    pure
+      StreamProcResult
+        { code
+        , stdout
+        , stderr
+        }
 
 partitionUnfoldr :: (s -> Maybe (Either a b, s)) -> s -> ([a], [b])
 partitionUnfoldr f =

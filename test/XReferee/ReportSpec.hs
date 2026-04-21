@@ -16,6 +16,7 @@ import XReferee.SearchResult (
   LabelLoc (..),
   Reference (..),
   SearchResult (..),
+  defaultDelims,
  )
 
 dummyColumnRange :: ColumnRange
@@ -27,7 +28,8 @@ spec = do
     it "renders a full report" $ do
       let result =
             SearchResult
-              { anchors =
+              { delims = defaultDelims
+              , anchors =
                   Map.fromList
                     [ (Anchor "foo", [LabelLoc "foo_anchor.py" 1 dummyColumnRange])
                     , (Anchor "unused", [LabelLoc "unused.py" 2 dummyColumnRange])
@@ -46,7 +48,8 @@ spec = do
     it "reports fatal errors" $ do
       let result =
             SearchResult
-              { anchors = Map.fromList []
+              { delims = defaultDelims
+              , anchors = Map.fromList []
               , references =
                   Map.fromList
                     [ (Reference "broken", [LabelLoc "broken.py" 2 dummyColumnRange])
@@ -57,7 +60,8 @@ spec = do
     it "ignores warnings" $ do
       let result =
             SearchResult
-              { anchors =
+              { delims = defaultDelims
+              , anchors =
                   Map.fromList
                     [ (Anchor "unused", [LabelLoc "unused.py" 1 dummyColumnRange])
                     ]

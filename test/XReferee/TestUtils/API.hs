@@ -15,12 +15,14 @@ import XReferee.SearchResult (
   LabelLoc (..),
   Reference (..),
   SearchOpts (..),
+  defaultDelims,
  )
 
 defaultOpts :: SearchOpts
 defaultOpts =
   SearchOpts
-    { ignores = []
+    { delims = defaultDelims
+    , ignores = []
     , includeUntracked = False
     }
 
