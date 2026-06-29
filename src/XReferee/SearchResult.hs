@@ -120,7 +120,15 @@ data LabelLoc = LabelLoc
   }
   deriving (Show, Eq, Ord)
 
+-- | 1-based line number.
 type LineNum = Int
+
+{- | 1-based column number.
+
+The column number is based on UTF-16 code units, which is how offsets
+are calculated by default in the LSP protocol.
+See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.18/specification/#textDocuments
+-}
 type ColNum = Int
 
 data ColumnRange = ColumnRange
