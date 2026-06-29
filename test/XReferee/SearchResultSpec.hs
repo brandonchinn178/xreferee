@@ -5,9 +5,14 @@
 
 module XReferee.SearchResultSpec (spec) where
 
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as LBS
 import Data.Map qualified as Map
+import Data.Text.Encoding qualified as TE
 import Skeletest
 import Skeletest.Predicate qualified as P
+import Skeletest.Prop.Gen qualified as Gen
+import Skeletest.Prop.Range qualified as Range
 import System.Directory (
   withCurrentDirectory,
  )
@@ -15,6 +20,7 @@ import XReferee.SearchResult (
   SearchOpts (..),
   SearchResult (..),
   findRefsFromGit,
+  utf16Length,
  )
 import XReferee.TestUtils.API (anchor, defaultOpts, loc', ref)
 import XReferee.TestUtils.Git (withGitRepo)
@@ -140,3 +146,12 @@ spec = do
                 }
         withCurrentDirectory "python/a/b/" $
           findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
+
+  describe "utf16Length" $ do
+    prop "matches reference implementation via encodeUtf16BE" $ do
+      t <- forAll $ Gen.text (Range.linear 0 100) Gen.unicodeAll
+      let bs = LBS.fromStrict (TE.encodeUtf8 t)
+      -- 1 UTF-16 code unit = 2 bytes, so we divide the length of the encoded
+      -- bytes by 2 to get the expected number of UTF-16 code units.
+      let expected = BS.length (TE.encodeUtf16BE t) `div` 2
+      utf16Length bs `shouldBe` expected

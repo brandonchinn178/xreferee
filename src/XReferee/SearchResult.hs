@@ -26,6 +26,7 @@ module XReferee.SearchResult (
 
   -- * Internal API
   parseLabels,
+  utf16Length,
 ) where
 
 import Control.DeepSeq (NFData (..), ($!!))

@@ -62,6 +62,7 @@ test-suite referee-tests
   build-depends:
       base
     , aeson
+    , bytestring
     , containers
     , directory
     , filepath
