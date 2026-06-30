@@ -20,10 +20,10 @@ import XReferee.SearchResult (
   SearchOpts (..),
   SearchResult (..),
   findRefsFromGit,
-  utf16Length,
  )
 import XReferee.TestUtils.API (anchor, defaultOpts, loc', ref)
 import XReferee.TestUtils.Git (withGitRepo)
+import XReferee.Utils.Utf16 (utf16Length)
 
 spec :: Spec
 spec = do
