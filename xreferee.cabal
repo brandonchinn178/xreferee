@@ -57,6 +57,7 @@ test-suite referee-tests
     XReferee.IntegrationSpec
     XReferee.SearchResultSpec
     XReferee.ReportSpec
+    XReferee.Utils.Utf16Spec
     XReferee.TestUtils.API
     XReferee.TestUtils.Git
     XReferee.TestUtils.Fixtures
