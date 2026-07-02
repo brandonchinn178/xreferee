@@ -26,6 +26,7 @@ library
   exposed-modules:
     XReferee.Report
     XReferee.SearchResult
+    XReferee.Utils.Utf16
   build-depends:
       base < 5
     , bytestring
@@ -56,12 +57,14 @@ test-suite referee-tests
     XReferee.IntegrationSpec
     XReferee.SearchResultSpec
     XReferee.ReportSpec
+    XReferee.Utils.Utf16Spec
     XReferee.TestUtils.API
     XReferee.TestUtils.Git
     XReferee.TestUtils.Fixtures
   build-depends:
       base
     , aeson
+    , bytestring
     , containers
     , directory
     , filepath

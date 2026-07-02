@@ -93,6 +93,39 @@ spec = do
                 }
         findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
 
+    it "counts columns as UTF-16 code units" $ do
+      {-
+        "😀" is a single codepoint (U+1F600), but is not in the BMP (Basic Multilingual Plane),
+        so it's encoded using 2 UTF-16 code units.
+
+        The family emoji "👨‍👩‍👧‍👦" is a sequence of 7 codepoints:
+          * U+1F468: 👨, 2 UTF-16 code units
+          * U+200D: ZWJ (zero-width joiner), 1 UTF-16 code units
+          * U+1F469: 👩, 2 UTF-16 code units
+          * U+200D: ZWJ, 1 UTF-16 code units
+          * U+1F467: 👧, 2 UTF-16 code units
+          * U+200D: ZWJ, 1 UTF-16 code units
+          * U+1F466: 👦, 2 UTF-16 code unitss
+        Total: 11 UTF-16 code units
+      -}
+      let files =
+            [ ("emoji_anchor.py", "#(ref:fo😀o)")
+            , ("family_anchor.py", "\x1F468\x200D\x1F469\x200D\x1F467\x200D\x1F466#(ref:bar)")
+            ]
+      withGitRepo files $ do
+        let expected =
+              SearchResult
+                { delims = defaultOpts.delims
+                , anchors =
+                    Map.fromList
+                      -- NOTE: columns are 1-based.
+                      [ anchor "fo😀o" [loc' "emoji_anchor.py" 1 (1, 12)]
+                      , anchor "bar" [loc' "family_anchor.py" 1 (12, 21)]
+                      ]
+                , references = mempty
+                }
+        findRefsFromGit defaultOpts `shouldSatisfy` P.returns (P.eq expected)
+
     it "finds references from subdirectory" $ do
       let files =
             [ ("python/a/b/foo_anchor.py", "FOO = 1 # #(ref:foo)")

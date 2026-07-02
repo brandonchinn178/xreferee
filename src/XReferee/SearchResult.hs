@@ -47,6 +47,7 @@ import System.Exit (ExitCode (..))
 import System.IO qualified as IO
 import System.Process qualified as Process
 import Text.Read (readMaybe)
+import XReferee.Utils.Utf16 (utf16Length)
 
 data SearchOpts = SearchOpts
   { delims :: MarkerDelims
@@ -119,7 +120,15 @@ data LabelLoc = LabelLoc
   }
   deriving (Show, Eq, Ord)
 
+-- | 1-based line number.
 type LineNum = Int
+
+{- | 1-based column number.
+
+The column number is based on UTF-16 code units, which is how offsets
+are calculated by default in the LSP protocol.
+See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.18/specification/#textDocuments
+-}
 type ColNum = Int
 
 data ColumnRange = ColumnRange
@@ -261,17 +270,18 @@ data ParseState = ParseState
   }
 instance HasField "drop" ParseState (Int64 -> ParseState) where
   getField state n =
-    ParseState
-      { str = LBS.drop n state.str
-      , col = state.col + fromIntegral n
-      }
+    let (before, after) = LBS.splitAt n state.str
+     in ParseState
+          { str = after
+          , col = state.col + utf16Length before
+          }
 instance HasField "stripPrefix" ParseState (LazyByteString -> Maybe ParseState) where
   getField state pre = go <$> LBS.stripPrefix pre state.str
     where
       go str' =
         ParseState
           { str = str'
-          , col = state.col + fromIntegral (LBS.length pre)
+          , col = state.col + utf16Length pre
           }
 instance HasField "splitOnce" ParseState (LazyByteString -> Maybe (LazyByteString, ParseState)) where
   getField state delim = go <$> splitOnce delim state.str
@@ -280,7 +290,7 @@ instance HasField "splitOnce" ParseState (LazyByteString -> Maybe (LazyByteStrin
         let state' =
               ParseState
                 { str = str'
-                , col = state.col + fromIntegral (LBS.length res + LBS.length delim)
+                , col = state.col + utf16Length res + utf16Length delim
                 }
          in (res, state')
 
