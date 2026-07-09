@@ -3,7 +3,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
 module XReferee.SearchResult (
@@ -27,26 +26,27 @@ module XReferee.SearchResult (
   parseLabels,
 ) where
 
-import Control.DeepSeq (NFData (..), ($!!))
-import Control.Exception (evaluate)
+import Control.DeepSeq (NFData (..))
 import Control.Monad (guard, when)
 import Data.Bitraversable (bitraverse)
 import Data.ByteString.Lazy (LazyByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.ByteString.Lazy.Char8 qualified as LBS.Char8
+import Data.Function ((&))
+import Data.Functor ((<&>))
 import Data.Int (Int64)
+import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Semigroup (sconcat)
 import Data.Text (Text)
-import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text
 import GHC.Records (HasField (..))
 import System.Exit (ExitCode (..))
 import System.IO qualified as IO
-import System.Process qualified as Process
 import Text.Read (readMaybe)
+import XReferee.Utils.Proc (StreamProcResult (..), chunkArgs, runProc, streamProcLines)
 import XReferee.Utils.Utf16 (utf16Length)
 
 data SearchOpts = SearchOpts
@@ -143,8 +143,94 @@ instance NFData ColumnRange where
 instance NFData LabelLoc where
   rnf loc = rnf loc.filepath `seq` rnf loc.lineNum `seq` rnf loc.columnRange
 
+{- | Find all refs and anchors in the current git repository.
+
+* If 'includeUntracked' is 'False', this will scan only files tracked by git (whether or not they are gitignored).
+* If it's 'True', untracked non-ignored files are also scanned.
+-}
 findRefsFromGit :: SearchOpts -> IO SearchResult
 findRefsFromGit opts = do
+  tracked <- findRefsInTracked opts
+  untracked <-
+    if opts.includeUntracked
+      then findRefsInUntrackedNonIgnored opts
+      else pure (emptySearchResult opts.delims)
+  pure (tracked <> untracked)
+
+findRefsInTracked :: SearchOpts -> IO SearchResult
+findRefsInTracked opts =
+  runGitGrep opts.delims trackedArgs
+  where
+    trackedArgs =
+      concat
+        [ gitGrepBaseArgs opts.delims
+        , ["--"]
+        , [":/"]
+        , [":!" <> i | i <- opts.ignores]
+        ]
+
+{- | Find refs and anchors in untracked, non-ignored files.
+
+We use `git ls-files` to enumerate the untracked, non-ignored files, and then run `git grep` on those files.
+See a detailed explanation here: https://github.com/brandonchinn178/xreferee/issues/27
+-}
+findRefsInUntrackedNonIgnored :: SearchOpts -> IO SearchResult
+findRefsInUntrackedNonIgnored opts = do
+  files <- listUntrackedFiles opts
+  -- NOTE: `git ls-files` can potentially return a long list of files, which we have to pass to `git grep`.
+  -- However, all platforms have a limit on the maximum command line length.
+  -- So we have to split the list of files into chunks that fit within that limit, and run `git grep` on each chunk.
+  case NonEmpty.nonEmpty (chunkArgs files) of
+    Nothing -> pure (emptySearchResult delims)
+    Just chunks -> sconcat <$> traverse (runGitGrep delims . untrackedArgs) chunks
+  where
+    delims = opts.delims
+
+    -- NOTE: `files` must be `NonEmpty`, otherwise `git grep` will revert to
+    -- its default behavior and also scan tracked files.
+    untrackedArgs :: NonEmpty Text -> [Text]
+    untrackedArgs files =
+      concat
+        [ gitGrepBaseArgs delims
+        , ["--untracked"] -- Without this, `git grep` ignores untracked pathspecs
+        , ["--"]
+        , NonEmpty.toList files
+        ]
+
+{- | List untracked, non-ignored files.
+Filepaths will be relative to the current working directory (not necessarily the repo root).
+-}
+listUntrackedFiles :: SearchOpts -> IO [Text]
+listUntrackedFiles opts = do
+  result <- runProc "git" args
+  LBS.hPutStr IO.stderr result.stderr
+  when (result.code /= ExitSuccess && (not . LBS.null) result.stderr) $
+    -- TODO: Proper error - https://github.com/brandonchinn178/xreferee/issues/4
+    errorWithoutStackTrace "git ls-files failed"
+  pure $
+    result.stdout
+      -- Split the lines by the NUL byte `\0`
+      & LBS.split 0
+      & filter (not . LBS.null)
+      <&> LBS.toStrict
+      <&> Text.decodeUtf8
+  where
+    args =
+      concat
+        [
+          [ "ls-files"
+          , "-z" -- Do not quote filenames with "unusual" characters. Output the filenames verbatim, separated by NUL bytes (i.e. `\0`).
+          , "--others" -- List only untracked files...
+          , "--exclude-standard" -- ... and apply the standard exclusion rules (e.g. .gitignore)
+          ]
+        , ["--"]
+        , [":/"]
+        , [":!" <> i | i <- opts.ignores]
+        ]
+
+-- | Run a single @git grep@ invocation and parse its output into a 'SearchResult'.
+runGitGrep :: MarkerDelims -> [Text] -> IO SearchResult
+runGitGrep delims args = do
   result <-
     streamProcLines "git" args $ \line -> do
       case extractGrepParts line of
@@ -162,26 +248,23 @@ findRefsFromGit opts = do
       Nothing -> emptySearchResult delims
       Just results -> sconcat results
   where
-    delims = opts.delims
-    args =
-      concat
-        [ ["grep"]
-        , ["-z", "--full-name", "--line-number"]
-        , ["-I"] -- ignore binary files
-        , ["--untracked" | opts.includeUntracked]
-        , ["--fixed-strings"]
-        , ["-e", delims.anchorStart]
-        , ["-e", delims.refStart]
-        , ["--"]
-        , [":/"]
-        , [":!" <> i | i <- opts.ignores]
-        ]
-
     extractGrepParts line = do
       [filepathStr, lineNumStr, match] <- pure $ LBS.split 0 line
       let filepath = LBS.Char8.unpack filepathStr
       lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
       Just (filepath, lineNum, match)
+
+-- | Shared @git grep@ flags and search patterns.
+gitGrepBaseArgs :: MarkerDelims -> [Text]
+gitGrepBaseArgs delims =
+  concat
+    [ ["grep"]
+    , ["-z", "--full-name", "--line-number"]
+    , ["-I"] -- ignore binary files
+    , ["--fixed-strings"]
+    , ["-e", delims.anchorStart]
+    , ["-e", delims.refStart]
+    ]
 
 toSearchResult ::
   MarkerDelims ->
@@ -295,37 +378,6 @@ instance HasField "splitOnce" ParseState (LazyByteString -> Maybe (LazyByteStrin
          in (res, state')
 
 {----- Utilities -----}
-
-data StreamProcResult a = StreamProcResult
-  { code :: ExitCode
-  , stdout :: a
-  , stderr :: LazyByteString
-  }
-
-streamProcLines ::
-  (NFData a) =>
-  FilePath ->
-  [Text] ->
-  (LazyByteString -> IO a) ->
-  IO (StreamProcResult [a])
-streamProcLines cmd args onStdoutLine = do
-  let proc =
-        (Process.proc cmd (map Text.unpack args))
-          { Process.std_out = Process.CreatePipe
-          , Process.std_err = Process.CreatePipe
-          }
-  Process.withCreateProcess proc $ \_ stdoutHandle stderrHandle ph -> do
-    rawStdout <- maybe (pure "") LBS.hGetContents stdoutHandle
-    stdout <- (evaluate $!!) =<< mapM onStdoutLine (LBS.Char8.lines rawStdout)
-    rawStderr <- maybe (pure "") LBS.hGetContents stderrHandle
-    stderr <- evaluate $!! rawStderr
-    code <- Process.waitForProcess ph
-    pure
-      StreamProcResult
-        { code
-        , stdout
-        , stderr
-        }
 
 partitionUnfoldr :: (s -> Maybe (Either a b, s)) -> s -> ([a], [b])
 partitionUnfoldr f =

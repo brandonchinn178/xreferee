@@ -26,6 +26,7 @@ library
   exposed-modules:
     XReferee.Report
     XReferee.SearchResult
+    XReferee.Utils.Proc
     XReferee.Utils.Utf16
   build-depends:
       base < 5

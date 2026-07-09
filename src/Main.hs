@@ -49,7 +49,7 @@ cliOptions =
         Opt.switch . mconcat $
           [ Opt.long "include-untracked"
           , Opt.short 'U'
-          , Opt.help "Include git untracked files in the search"
+          , Opt.help "Include git untracked non-ignored files in the search"
           ]
       pure SearchOpts{..}
 
