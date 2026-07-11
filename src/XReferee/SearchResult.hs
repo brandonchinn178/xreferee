@@ -177,24 +177,31 @@ See a detailed explanation here: https://github.com/brandonchinn178/xreferee/iss
 findRefsInUntrackedNonIgnored :: SearchOpts -> IO SearchResult
 findRefsInUntrackedNonIgnored opts = do
   files <- listUntrackedFiles opts
+  -- Turn each path into a literal pathspec, so filenames containing
+  -- glob metacharacters (e.g. `[id].tsx`) are interpreted literally and not as a glob pattern.
+  let pathspecs = files <&> (literalPathspecPrefix <>)
   -- NOTE: `git ls-files` can potentially return a long list of files, which we have to pass to `git grep`.
   -- However, all platforms have a limit on the maximum command line length.
-  -- So we have to split the list of files into chunks that fit within that limit, and run `git grep` on each chunk.
-  case NonEmpty.nonEmpty (chunkArgs files) of
+  -- So we have to split the list of pathspecs into chunks that fit within that limit, and run `git grep` on each chunk.
+  case NonEmpty.nonEmpty (chunkArgs pathspecs) of
     Nothing -> pure (emptySearchResult delims)
     Just chunks -> sconcat <$> traverse (runGitGrep delims . untrackedArgs) chunks
   where
     delims = opts.delims
 
-    -- NOTE: `files` must be `NonEmpty`, otherwise `git grep` will revert to
+    -- A prefix that tells git to interpret a pathspec literally, and not as a glob pattern.
+    literalPathspecPrefix :: Text
+    literalPathspecPrefix = ":(literal)"
+
+    -- NOTE: `pathspecs` must be `NonEmpty`, otherwise `git grep` will revert to
     -- its default behavior and also scan tracked files.
     untrackedArgs :: NonEmpty Text -> [Text]
-    untrackedArgs files =
+    untrackedArgs pathspecs =
       concat
         [ gitGrepBaseArgs delims
-        , ["--untracked"] -- Without this, `git grep` ignores untracked pathspecs
+        , ["--untracked"] -- Without this, `git grep` ignores untracked files
         , ["--"]
-        , NonEmpty.toList files
+        , NonEmpty.toList pathspecs
         ]
 
 {- | List untracked, non-ignored files.
