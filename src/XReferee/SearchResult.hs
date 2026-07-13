@@ -26,6 +26,7 @@ module XReferee.SearchResult (
   parseLabels,
 ) where
 
+import Control.Concurrent.Async (mapConcurrently)
 import Control.DeepSeq (NFData (..))
 import Control.Monad (guard, when)
 import Data.Bitraversable (bitraverse)
@@ -183,11 +184,12 @@ findRefsInUntrackedNonIgnored opts = do
   -- NOTE: `git ls-files` can potentially return a long list of files, which we have to pass to `git grep`.
   -- However, all platforms have a limit on the maximum command line length.
   -- So we have to split the list of pathspecs into chunks that fit within that limit, and run `git grep` on each chunk.
-  case NonEmpty.nonEmpty (chunkArgs pathspecs) of
-    Nothing -> pure (emptySearchResult delims)
-    Just chunks -> sconcat <$> traverse (runGitGrep delims . untrackedArgs) chunks
+  combineResults <$> mapConcurrently (runGitGrep delims . untrackedArgs) (chunkArgs pathspecs)
   where
     delims = opts.delims
+
+    combineResults :: [SearchResult] -> SearchResult
+    combineResults results = maybe (emptySearchResult delims) sconcat (NonEmpty.nonEmpty results)
 
     -- A prefix that tells git to interpret a pathspec literally, and not as a glob pattern.
     literalPathspecPrefix :: Text

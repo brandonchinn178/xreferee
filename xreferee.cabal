@@ -30,6 +30,7 @@ library
     XReferee.Utils.Utf16
   build-depends:
       base < 5
+    , async
     , bytestring
     , containers
     , deepseq
