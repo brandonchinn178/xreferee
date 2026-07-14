@@ -34,13 +34,13 @@ import Data.ByteString.Lazy (LazyByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.ByteString.Lazy.Char8 qualified as LBS.Char8
 import Data.Function ((&))
-import Data.Functor ((<&>))
 import Data.Int (Int64)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Semigroup (sconcat)
 import Data.Text (Text)
+import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text
 import GHC.Records (HasField (..))
 import System.Exit (ExitCode (..))
@@ -212,11 +212,10 @@ listUntrackedFiles opts = do
     errorWithoutStackTrace "git ls-files failed"
   pure $
     result.stdout
-      -- Split the lines by the NUL byte `\0`
-      & LBS.split 0
-      & filter (not . LBS.null)
-      <&> LBS.toStrict
-      <&> Text.decodeUtf8
+      & LBS.toStrict
+      & Text.decodeUtf8
+      & Text.splitOn "\0"
+      & filter (not . Text.null)
   where
     args =
       concat
