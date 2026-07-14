@@ -47,7 +47,7 @@ import GHC.Records (HasField (..))
 import System.Exit (ExitCode (..))
 import System.IO qualified as IO
 import Text.Read (readMaybe)
-import XReferee.Utils.Proc (StreamProcResult (..), runProc, streamProcLines)
+import XReferee.Utils.Proc (StreamProcResult (..), withRunProc)
 import XReferee.Utils.Utf16 (utf16Length)
 
 data SearchOpts = SearchOpts
@@ -160,15 +160,9 @@ findRefsFromGit opts = do
 
 findRefsInTracked :: SearchOpts -> IO SearchResult
 findRefsInTracked opts =
-  runGitGrep
-    opts.delims
-    []
-    []
-    ( concat
-        [ [":/"]
-        , [":!" <> i | i <- opts.ignores]
-        ]
-    )
+  runGitGrep opts.delims [] [] pathspecs
+  where
+    pathspecs = ":/" : [":!" <> i | i <- opts.ignores]
 
 {- | Find refs and anchors in untracked, non-ignored files.
 
@@ -182,7 +176,7 @@ findRefsInUntrackedNonIgnored opts = do
   -- However, all platforms have a limit on the maximum command line length.
   -- So we have to either split the list of files into batches, or run `git grep` once per file.
   -- We choose the latter for simplicity.
-  concatSearchResults delims <$> forConcurrently files \file ->
+  results <- forConcurrently files \file ->
     runGitGrep
       delims
       -- Interpret the filepath as a literal pathspec, so filenames containing
@@ -191,6 +185,7 @@ findRefsInUntrackedNonIgnored opts = do
       -- Without this, `git grep` ignores untracked files
       ["--untracked"]
       [file]
+  pure $ concatSearchResults delims results
   where
     delims = opts.delims
 
@@ -199,60 +194,40 @@ Filepaths will be relative to the current working directory (not necessarily the
 -}
 listUntrackedFiles :: SearchOpts -> IO [Text]
 listUntrackedFiles opts = do
-  result <- runProc "git" args
-  LBS.hPutStr IO.stderr result.stderr
-  when (result.code /= ExitSuccess && (not . LBS.null) result.stderr) $
-    -- TODO: Proper error - https://github.com/brandonchinn178/xreferee/issues/4
-    errorWithoutStackTrace "git ls-files failed"
+  stdout <- runGit [] "ls-files" flags pathspecs
   pure $
-    result.stdout
+    stdout
       & LBS.toStrict
       & Text.decodeUtf8
       & Text.splitOn "\0"
       & filter (not . Text.null)
   where
-    args =
-      concat
-        [
-          [ "ls-files"
-          , "-z" -- Do not quote filenames with "unusual" characters. Output the filenames verbatim, separated by NUL bytes (i.e. `\0`).
-          , "--others" -- List only untracked files...
-          , "--exclude-standard" -- ... and apply the standard exclusion rules (e.g. .gitignore)
-          ]
-        , ["--"]
-        , [":/"]
-        , [":!" <> i | i <- opts.ignores]
-        ]
+    flags =
+      [ "-z" -- Do not quote filenames with "unusual" characters. Output the filenames verbatim, separated by NUL bytes (i.e. `\0`).
+      , "--others" -- List only untracked files...
+      , "--exclude-standard" -- ... and apply the standard exclusion rules (e.g. .gitignore)
+      ]
+    pathspecs = ":/" : [":!" <> i | i <- opts.ignores]
 
 -- | Run a single @git grep@ invocation and parse its output into a 'SearchResult'.
 runGitGrep :: MarkerDelims -> [Text] -> [Text] -> [Text] -> IO SearchResult
 runGitGrep delims globalFlags flags pathspecs = do
-  result <-
-    streamProcLines "git" args $ \line -> do
-      case extractGrepParts line of
-        Nothing -> do
-          LBS.Char8.hPutStrLn IO.stderr $ "[WARN] Found line in unexpected format: " <> line
-          pure $ emptySearchResult delims
-        Just (filepath, lineNum, match) -> do
-          pure $ toSearchResult delims filepath lineNum match
-  LBS.hPutStr IO.stderr result.stderr
-  when (result.code /= ExitSuccess && (not . LBS.null) result.stderr) $
-    -- TODO: Proper error - https://github.com/brandonchinn178/xreferee/issues/4
-    errorWithoutStackTrace "git grep failed"
-  pure $ concatSearchResults delims result.stdout
+  results <- streamGitLines globalFlags "grep" (grepArgs <> flags) pathspecs \line ->
+    case extractGrepParts line of
+      Nothing -> do
+        LBS.Char8.hPutStrLn IO.stderr $ "[WARN] Found line in unexpected format: " <> line
+        pure $ emptySearchResult delims
+      Just (filepath, lineNum, match) ->
+        pure $ toSearchResult delims filepath lineNum match
+  pure $ concatSearchResults delims results
   where
-    args =
+    grepArgs =
       concat
-        [ globalFlags
-        , ["grep"]
-        , ["-z", "--full-name", "--line-number"]
+        [ ["-z", "--full-name", "--line-number"]
         , ["-I"] -- ignore binary files
         , ["--fixed-strings"]
         , ["-e", delims.anchorStart]
         , ["-e", delims.refStart]
-        , flags
-        , ["--"]
-        , pathspecs
         ]
 
     extractGrepParts line = do
@@ -376,6 +351,44 @@ instance HasField "splitOnce" ParseState (LazyByteString -> Maybe (LazyByteStrin
          in (res, state')
 
 {----- Utilities -----}
+
+{- | Run a @git@ subcommand, checking its exit code and forwarding stderr,
+then passing its raw stdout through @onStdout@ to produce the result.
+-}
+withRunGit ::
+  (NFData a) =>
+  [Text] ->
+  Text ->
+  [Text] ->
+  [Text] ->
+  (LazyByteString -> IO a) ->
+  IO a
+withRunGit globalFlags subcommand flags pathspecs onStdout = do
+  result <- withRunProc "git" args onStdout
+  LBS.hPutStr IO.stderr result.stderr
+  when (result.code /= ExitSuccess && (not . LBS.null) result.stderr) $
+    -- TODO: Proper error - https://github.com/brandonchinn178/xreferee/issues/4
+    errorWithoutStackTrace $
+      "git " <> Text.unpack subcommand <> " failed"
+  pure result.stdout
+  where
+    args = concat [globalFlags, [subcommand], flags, ["--"], pathspecs]
+
+-- | Run a @git@ subcommand and capture its stdout, fully forced.
+runGit :: [Text] -> Text -> [Text] -> [Text] -> IO LazyByteString
+runGit globalFlags subcommand flags pathspecs = withRunGit globalFlags subcommand flags pathspecs pure
+
+-- | Run a @git@ subcommand, applying @onLine@ to each line of stdout.
+streamGitLines ::
+  (NFData a) =>
+  [Text] ->
+  Text ->
+  [Text] ->
+  [Text] ->
+  (LazyByteString -> IO a) ->
+  IO [a]
+streamGitLines globalFlags subcommand flags pathspecs onLine =
+  withRunGit globalFlags subcommand flags pathspecs (mapM onLine . LBS.Char8.lines)
 
 partitionUnfoldr :: (s -> Maybe (Either a b, s)) -> s -> ([a], [b])
 partitionUnfoldr f =
