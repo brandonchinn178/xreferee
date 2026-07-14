@@ -182,7 +182,7 @@ findRefsInUntrackedNonIgnored opts = do
   -- However, all platforms have a limit on the maximum command line length.
   -- So we have to either split the list of files into batches, or run `git grep` once per file.
   -- We choose the latter for simplicity.
-  combineResults <$> forConcurrently files \file ->
+  concatSearchResults delims <$> forConcurrently files \file ->
     runGitGrep
       delims
       -- Interpret the filepath as a literal pathspec, so filenames containing
@@ -193,9 +193,6 @@ findRefsInUntrackedNonIgnored opts = do
       [file]
   where
     delims = opts.delims
-
-    combineResults :: [SearchResult] -> SearchResult
-    combineResults results = maybe (emptySearchResult delims) sconcat (NonEmpty.nonEmpty results)
 
 {- | List untracked, non-ignored files.
 Filepaths will be relative to the current working directory (not necessarily the repo root).
@@ -242,10 +239,7 @@ runGitGrep delims globalFlags flags pathspecs = do
   when (result.code /= ExitSuccess && (not . LBS.null) result.stderr) $
     -- TODO: Proper error - https://github.com/brandonchinn178/xreferee/issues/4
     errorWithoutStackTrace "git grep failed"
-  pure $
-    case NonEmpty.nonEmpty result.stdout of
-      Nothing -> emptySearchResult delims
-      Just results -> sconcat results
+  pure $ concatSearchResults delims result.stdout
   where
     args =
       concat
@@ -266,6 +260,9 @@ runGitGrep delims globalFlags flags pathspecs = do
       let filepath = LBS.Char8.unpack filepathStr
       lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
       Just (filepath, lineNum, match)
+
+concatSearchResults :: MarkerDelims -> [SearchResult] -> SearchResult
+concatSearchResults delims results = maybe (emptySearchResult delims) sconcat (NonEmpty.nonEmpty results)
 
 toSearchResult ::
   MarkerDelims ->
