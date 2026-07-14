@@ -1,3 +1,4 @@
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
@@ -26,7 +27,7 @@ module XReferee.SearchResult (
   parseLabels,
 ) where
 
-import Control.Concurrent.Async (mapConcurrently)
+import Control.Concurrent.Async (forConcurrently)
 import Control.DeepSeq (NFData (..))
 import Control.Monad (guard, when)
 import Data.Bitraversable (bitraverse)
@@ -159,15 +160,15 @@ findRefsFromGit opts = do
 
 findRefsInTracked :: SearchOpts -> IO SearchResult
 findRefsInTracked opts =
-  runGitGrep opts.delims trackedArgs
-  where
-    trackedArgs =
-      concat
-        [ gitGrepBaseArgs opts.delims
-        , ["--"]
-        , [":/"]
+  runGitGrep
+    opts.delims
+    []
+    []
+    ( concat
+        [ [":/"]
         , [":!" <> i | i <- opts.ignores]
         ]
+    )
 
 {- | Find refs and anchors in untracked, non-ignored files.
 
@@ -181,24 +182,20 @@ findRefsInUntrackedNonIgnored opts = do
   -- However, all platforms have a limit on the maximum command line length.
   -- So we have to either split the list of files into batches, or run `git grep` once per file.
   -- We choose the latter for simplicity.
-  combineResults <$> mapConcurrently (runGitGrep delims . untrackedArgs) files
+  combineResults <$> forConcurrently files \file ->
+    runGitGrep
+      delims
+      -- Interpret the filepath as a literal pathspec, so filenames containing
+      -- glob metacharacters (e.g. `[id].tsx`) are matched literally and not as a glob pattern.
+      ["--literal-pathspecs"]
+      -- Without this, `git grep` ignores untracked files
+      ["--untracked"]
+      [file]
   where
     delims = opts.delims
 
     combineResults :: [SearchResult] -> SearchResult
     combineResults results = maybe (emptySearchResult delims) sconcat (NonEmpty.nonEmpty results)
-
-    untrackedArgs :: Text -> [Text]
-    untrackedArgs file =
-      concat
-        [ -- Interpret the filepath as a literal pathspec, so filenames containing
-          -- glob metacharacters (e.g. `[id].tsx`) are matched literally and not as a glob pattern.
-          ["--literal-pathspecs"]
-        , gitGrepBaseArgs delims
-        , ["--untracked"] -- Without this, `git grep` ignores untracked files
-        , ["--"]
-        , [file]
-        ]
 
 {- | List untracked, non-ignored files.
 Filepaths will be relative to the current working directory (not necessarily the repo root).
@@ -231,8 +228,8 @@ listUntrackedFiles opts = do
         ]
 
 -- | Run a single @git grep@ invocation and parse its output into a 'SearchResult'.
-runGitGrep :: MarkerDelims -> [Text] -> IO SearchResult
-runGitGrep delims args = do
+runGitGrep :: MarkerDelims -> [Text] -> [Text] -> [Text] -> IO SearchResult
+runGitGrep delims globalFlags flags pathspecs = do
   result <-
     streamProcLines "git" args $ \line -> do
       case extractGrepParts line of
@@ -250,23 +247,25 @@ runGitGrep delims args = do
       Nothing -> emptySearchResult delims
       Just results -> sconcat results
   where
+    args =
+      concat
+        [ globalFlags
+        , ["grep"]
+        , ["-z", "--full-name", "--line-number"]
+        , ["-I"] -- ignore binary files
+        , ["--fixed-strings"]
+        , ["-e", delims.anchorStart]
+        , ["-e", delims.refStart]
+        , flags
+        , ["--"]
+        , pathspecs
+        ]
+
     extractGrepParts line = do
       [filepathStr, lineNumStr, match] <- pure $ LBS.split 0 line
       let filepath = LBS.Char8.unpack filepathStr
       lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
       Just (filepath, lineNum, match)
-
--- | Shared @git grep@ flags and search patterns.
-gitGrepBaseArgs :: MarkerDelims -> [Text]
-gitGrepBaseArgs delims =
-  concat
-    [ ["grep"]
-    , ["-z", "--full-name", "--line-number"]
-    , ["-I"] -- ignore binary files
-    , ["--fixed-strings"]
-    , ["-e", delims.anchorStart]
-    , ["-e", delims.refStart]
-    ]
 
 toSearchResult ::
   MarkerDelims ->
