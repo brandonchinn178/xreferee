@@ -36,7 +36,6 @@ import Data.ByteString.Lazy.Char8 qualified as LBS.Char8
 import Data.Function ((&))
 import Data.Functor ((<&>))
 import Data.Int (Int64)
-import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map (Map)
 import Data.Map qualified as Map
@@ -47,7 +46,7 @@ import GHC.Records (HasField (..))
 import System.Exit (ExitCode (..))
 import System.IO qualified as IO
 import Text.Read (readMaybe)
-import XReferee.Utils.Proc (StreamProcResult (..), chunkArgs, runProc, streamProcLines)
+import XReferee.Utils.Proc (StreamProcResult (..), runProc, streamProcLines)
 import XReferee.Utils.Utf16 (utf16Length)
 
 data SearchOpts = SearchOpts
@@ -180,26 +179,25 @@ findRefsInUntrackedNonIgnored opts = do
   files <- listUntrackedFiles opts
   -- NOTE: `git ls-files` can potentially return a long list of files, which we have to pass to `git grep`.
   -- However, all platforms have a limit on the maximum command line length.
-  -- So we have to split the list of pathspecs into chunks that fit within that limit, and run `git grep` on each chunk.
-  combineResults <$> mapConcurrently (runGitGrep delims . untrackedArgs) (chunkArgs files)
+  -- So we have to either split the list of files into batches, or run `git grep` once per file.
+  -- We choose the latter for simplicity.
+  combineResults <$> mapConcurrently (runGitGrep delims . untrackedArgs) files
   where
     delims = opts.delims
 
     combineResults :: [SearchResult] -> SearchResult
     combineResults results = maybe (emptySearchResult delims) sconcat (NonEmpty.nonEmpty results)
 
-    -- NOTE: `pathspecs` must be `NonEmpty`, otherwise `git grep` will revert to
-    -- its default behavior and also scan tracked files.
-    untrackedArgs :: NonEmpty Text -> [Text]
-    untrackedArgs pathspecs =
+    untrackedArgs :: Text -> [Text]
+    untrackedArgs file =
       concat
-        [ -- Interpret filepaths as literal pathspecs, so filenames containing
+        [ -- Interpret the filepath as a literal pathspec, so filenames containing
           -- glob metacharacters (e.g. `[id].tsx`) are matched literally and not as a glob pattern.
           ["--literal-pathspecs"]
         , gitGrepBaseArgs delims
         , ["--untracked"] -- Without this, `git grep` ignores untracked files
         , ["--"]
-        , NonEmpty.toList pathspecs
+        , [file]
         ]
 
 {- | List untracked, non-ignored files.
