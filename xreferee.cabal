@@ -26,9 +26,11 @@ library
   exposed-modules:
     XReferee.Report
     XReferee.SearchResult
+    XReferee.Utils.Proc
     XReferee.Utils.Utf16
   build-depends:
       base < 5
+    , async
     , bytestring
     , containers
     , deepseq
@@ -45,7 +47,7 @@ executable xreferee
     , text
     , xreferee
   default-language: GHC2021
-  ghc-options: -Wall -Wcompat
+  ghc-options: -Wall -Wcompat -threaded -rtsopts "-with-rtsopts=-N"
 
 test-suite referee-tests
   type: exitcode-stdio-1.0

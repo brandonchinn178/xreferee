@@ -1,9 +1,9 @@
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
 module XReferee.SearchResult (
@@ -27,13 +27,14 @@ module XReferee.SearchResult (
   parseLabels,
 ) where
 
-import Control.DeepSeq (NFData (..), ($!!))
-import Control.Exception (evaluate)
+import Control.Concurrent.Async (forConcurrently)
+import Control.DeepSeq (NFData (..))
 import Control.Monad (guard, when)
 import Data.Bitraversable (bitraverse)
 import Data.ByteString.Lazy (LazyByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.ByteString.Lazy.Char8 qualified as LBS.Char8
+import Data.Function ((&))
 import Data.Int (Int64)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map (Map)
@@ -45,8 +46,8 @@ import Data.Text.Encoding qualified as Text
 import GHC.Records (HasField (..))
 import System.Exit (ExitCode (..))
 import System.IO qualified as IO
-import System.Process qualified as Process
 import Text.Read (readMaybe)
+import XReferee.Utils.Proc (StreamProcResult (..), withRunProc)
 import XReferee.Utils.Utf16 (utf16Length)
 
 data SearchOpts = SearchOpts
@@ -143,38 +144,90 @@ instance NFData ColumnRange where
 instance NFData LabelLoc where
   rnf loc = rnf loc.filepath `seq` rnf loc.lineNum `seq` rnf loc.columnRange
 
+{- | Find all refs and anchors in the current git repository.
+
+* If 'includeUntracked' is 'False', this will scan only files tracked by git (whether or not they are gitignored).
+* If it's 'True', untracked non-ignored files are also scanned.
+-}
 findRefsFromGit :: SearchOpts -> IO SearchResult
 findRefsFromGit opts = do
-  result <-
-    streamProcLines "git" args $ \line -> do
-      case extractGrepParts line of
-        Nothing -> do
-          LBS.Char8.hPutStrLn IO.stderr $ "[WARN] Found line in unexpected format: " <> line
-          pure $ emptySearchResult delims
-        Just (filepath, lineNum, match) -> do
-          pure $ toSearchResult delims filepath lineNum match
-  LBS.hPutStr IO.stderr result.stderr
-  when (result.code /= ExitSuccess && (not . LBS.null) result.stderr) $
-    -- TODO: Proper error - https://github.com/brandonchinn178/xreferee/issues/4
-    errorWithoutStackTrace "git grep failed"
-  pure $
-    case NonEmpty.nonEmpty result.stdout of
-      Nothing -> emptySearchResult delims
-      Just results -> sconcat results
+  tracked <- findRefsInTracked opts
+  untracked <-
+    if opts.includeUntracked
+      then findRefsInUntrackedNonIgnored opts
+      else pure (emptySearchResult opts.delims)
+  pure (tracked <> untracked)
+
+findRefsInTracked :: SearchOpts -> IO SearchResult
+findRefsInTracked opts =
+  runGitGrep opts.delims [] [] pathspecs
+  where
+    pathspecs = ":/" : [":!" <> i | i <- opts.ignores]
+
+{- | Find refs and anchors in untracked, non-ignored files.
+
+We use `git ls-files` to enumerate the untracked, non-ignored files, and then run `git grep` on those files.
+See a detailed explanation here: https://github.com/brandonchinn178/xreferee/issues/27
+-}
+findRefsInUntrackedNonIgnored :: SearchOpts -> IO SearchResult
+findRefsInUntrackedNonIgnored opts = do
+  files <- listUntrackedFiles opts
+  -- NOTE: `git ls-files` can potentially return a long list of files, which we have to pass to `git grep`.
+  -- However, all platforms have a limit on the maximum command line length.
+  -- So we have to either split the list of files into batches, or run `git grep` once per file.
+  -- We choose the latter for simplicity.
+  results <- forConcurrently files \file ->
+    runGitGrep
+      delims
+      globalFlags
+      ["--untracked"]
+      [file]
+  pure $ concatSearchResults delims results
   where
     delims = opts.delims
-    args =
+    -- Interpret the filepath as a literal pathspec, so filenames containing
+    -- glob metacharacters (e.g. `[id].tsx`) are matched literally and not as a glob pattern.
+    globalFlags = ["--literal-pathspecs"]
+
+{- | List untracked, non-ignored files.
+Filepaths will be relative to the current working directory (not necessarily the repo root).
+-}
+listUntrackedFiles :: SearchOpts -> IO [Text]
+listUntrackedFiles opts = do
+  stdout <- runGit [] "ls-files" flags pathspecs
+  pure $
+    stdout
+      & LBS.toStrict
+      & Text.decodeUtf8
+      & Text.splitOn "\0"
+      & filter (not . Text.null)
+  where
+    flags =
+      [ "-z" -- Do not quote filenames with "unusual" characters. Output the filenames verbatim, separated by NUL bytes (i.e. `\0`).
+      , "--others" -- List only untracked files...
+      , "--exclude-standard" -- ... and apply the standard exclusion rules (e.g. .gitignore)
+      ]
+    pathspecs = ":/" : [":!" <> i | i <- opts.ignores]
+
+-- | Run a single @git grep@ invocation and parse its output into a 'SearchResult'.
+runGitGrep :: MarkerDelims -> [Text] -> [Text] -> [Text] -> IO SearchResult
+runGitGrep delims globalFlags flags pathspecs = do
+  results <- streamGitLines globalFlags "grep" (grepArgs <> flags) pathspecs \line ->
+    case extractGrepParts line of
+      Nothing -> do
+        LBS.Char8.hPutStrLn IO.stderr $ "[WARN] Found line in unexpected format: " <> line
+        pure $ emptySearchResult delims
+      Just (filepath, lineNum, match) ->
+        pure $ toSearchResult delims filepath lineNum match
+  pure $ concatSearchResults delims results
+  where
+    grepArgs =
       concat
-        [ ["grep"]
-        , ["-z", "--full-name", "--line-number"]
+        [ ["-z", "--full-name", "--line-number"]
         , ["-I"] -- ignore binary files
-        , ["--untracked" | opts.includeUntracked]
         , ["--fixed-strings"]
         , ["-e", delims.anchorStart]
         , ["-e", delims.refStart]
-        , ["--"]
-        , [":/"]
-        , [":!" <> i | i <- opts.ignores]
         ]
 
     extractGrepParts line = do
@@ -182,6 +235,9 @@ findRefsFromGit opts = do
       let filepath = LBS.Char8.unpack filepathStr
       lineNum <- readMaybe $ LBS.Char8.unpack lineNumStr
       Just (filepath, lineNum, match)
+
+concatSearchResults :: MarkerDelims -> [SearchResult] -> SearchResult
+concatSearchResults delims results = maybe (emptySearchResult delims) sconcat (NonEmpty.nonEmpty results)
 
 toSearchResult ::
   MarkerDelims ->
@@ -296,36 +352,43 @@ instance HasField "splitOnce" ParseState (LazyByteString -> Maybe (LazyByteStrin
 
 {----- Utilities -----}
 
-data StreamProcResult a = StreamProcResult
-  { code :: ExitCode
-  , stdout :: a
-  , stderr :: LazyByteString
-  }
-
-streamProcLines ::
+{- | Run a @git@ subcommand, checking its exit code and forwarding stderr,
+then passing its raw stdout through @onStdout@ to produce the result.
+-}
+withRunGit ::
   (NFData a) =>
-  FilePath ->
+  [Text] ->
+  Text ->
+  [Text] ->
   [Text] ->
   (LazyByteString -> IO a) ->
-  IO (StreamProcResult [a])
-streamProcLines cmd args onStdoutLine = do
-  let proc =
-        (Process.proc cmd (map Text.unpack args))
-          { Process.std_out = Process.CreatePipe
-          , Process.std_err = Process.CreatePipe
-          }
-  Process.withCreateProcess proc $ \_ stdoutHandle stderrHandle ph -> do
-    rawStdout <- maybe (pure "") LBS.hGetContents stdoutHandle
-    stdout <- (evaluate $!!) =<< mapM onStdoutLine (LBS.Char8.lines rawStdout)
-    rawStderr <- maybe (pure "") LBS.hGetContents stderrHandle
-    stderr <- evaluate $!! rawStderr
-    code <- Process.waitForProcess ph
-    pure
-      StreamProcResult
-        { code
-        , stdout
-        , stderr
-        }
+  IO a
+withRunGit globalFlags subcommand flags pathspecs onStdout = do
+  result <- withRunProc "git" args onStdout
+  LBS.hPutStr IO.stderr result.stderr
+  when (result.code /= ExitSuccess && (not . LBS.null) result.stderr) $
+    -- TODO: Proper error - https://github.com/brandonchinn178/xreferee/issues/4
+    errorWithoutStackTrace $
+      "git " <> Text.unpack subcommand <> " failed"
+  pure result.stdout
+  where
+    args = concat [globalFlags, [subcommand], flags, ["--"], pathspecs]
+
+-- | Run a @git@ subcommand and capture its stdout, fully forced.
+runGit :: [Text] -> Text -> [Text] -> [Text] -> IO LazyByteString
+runGit globalFlags subcommand flags pathspecs = withRunGit globalFlags subcommand flags pathspecs pure
+
+-- | Run a @git@ subcommand, applying @onLine@ to each line of stdout.
+streamGitLines ::
+  (NFData a) =>
+  [Text] ->
+  Text ->
+  [Text] ->
+  [Text] ->
+  (LazyByteString -> IO a) ->
+  IO [a]
+streamGitLines globalFlags subcommand flags pathspecs onLine =
+  withRunGit globalFlags subcommand flags pathspecs (mapM onLine . LBS.Char8.lines)
 
 partitionUnfoldr :: (s -> Maybe (Either a b, s)) -> s -> ([a], [b])
 partitionUnfoldr f =
