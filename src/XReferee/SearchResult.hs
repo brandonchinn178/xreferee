@@ -179,15 +179,15 @@ findRefsInUntrackedNonIgnored opts = do
   results <- forConcurrently files \file ->
     runGitGrep
       delims
-      -- Interpret the filepath as a literal pathspec, so filenames containing
-      -- glob metacharacters (e.g. `[id].tsx`) are matched literally and not as a glob pattern.
-      ["--literal-pathspecs"]
-      -- Without this, `git grep` ignores untracked files
+      globalFlags
       ["--untracked"]
       [file]
   pure $ concatSearchResults delims results
   where
     delims = opts.delims
+    -- Interpret the filepath as a literal pathspec, so filenames containing
+    -- glob metacharacters (e.g. `[id].tsx`) are matched literally and not as a glob pattern.
+    globalFlags = ["--literal-pathspecs"]
 
 {- | List untracked, non-ignored files.
 Filepaths will be relative to the current working directory (not necessarily the repo root).
